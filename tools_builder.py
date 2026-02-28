@@ -35,6 +35,32 @@ import os
 
 dotenv.load_dotenv()
 
+# ── Public-APIs fallback reference ─────────────────────────────────────────────
+try:
+    from api_reference import (
+        get_best_apis, format_api_context,
+        scrape_docs_for_apis, format_api_context_with_docs,
+    )
+    HAS_API_REFERENCE = True
+except ImportError:
+    HAS_API_REFERENCE = False
+
+# ── Confidence assessment (same heuristics as mcp_builder) ─────────────────────
+
+_SUSPICIOUS_DOMAINS = ["example.com", "fakeapi", "placeholder", "dummyapi", "mockapi"]
+
+def _assess_confidence(code: str) -> dict:
+    """Quick confidence check on generated code (runs locally, no LLM)."""
+    import re
+    score, reasons = 1.0, []
+    if not valid_syntax(code):
+        score -= 0.5; reasons.append("syntax errors")
+    if not any(re.search(p, code) for p in [r"requests\.(get|post|put|patch|delete)", r"httpx\.", r"aiohttp\."]):
+        score -= 0.3; reasons.append("no API calls")
+    if any(d in code.lower() for d in _SUSPICIOUS_DOMAINS):
+        score -= 0.4; reasons.append("suspicious URLs")
+    return {"confident": score >= 0.7 and len(reasons) == 0, "score": max(0.0, score), "reasons": reasons}
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER","openai").lower()
@@ -79,6 +105,7 @@ Rules:
 - Produce between 2 and 6 servers; pick the most impactful ones for the goal.
 - Each server should have a single, coherent responsibility.
 - Do not repeat functionality across servers.
+- ALWAYS specify a concrete, real public API for each server to use. Do NOT leave the API choice vague.
 """
 
 def plan_tools(goal: str) -> list[dict]:
@@ -115,10 +142,27 @@ def plan_tools(goal: str) -> list[dict]:
             ],
         )
         raw = message.choices[0].message.content.strip()
+
+    # ── Robustly parse JSON from the LLM output ──────────────────────────
+    # Strip markdown code fences
     if raw.startswith("```"):
         raw = re.sub(r"^```[^\n]*\n", "", raw)
         raw = re.sub(r"\n```\s*$", "", raw)
-    return json.loads(raw)
+
+    # Extract just the JSON array if there's extra text around it
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if match:
+        raw = match.group(0)
+
+    # Remove trailing commas before ] or } (common LLM mistake)
+    raw = re.sub(r",\s*([}\]])", r"\1", raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"  [plan_tools] JSON parse failed: {e}")
+        print(f"  [plan_tools] Raw output (first 500 chars): {raw[:500]}")
+        raise
 
 
 # ── Modal worker (runs in parallel on Modal) ───────────────────────────────────
@@ -128,16 +172,18 @@ def plan_tools(goal: str) -> list[dict]:
     secrets=secrets_list,
     timeout=300,
 )
-def build_one_mcp(prompt: str, template: str) -> str:
+def build_one_mcp(prompt: str, template: str, api_context: str = "") -> str:
     """
     Runs on a Modal worker.  Generates one complete MCP server and returns its source.
+    If api_context is provided, it will be injected into the system prompt so the LLM
+    uses real, curated APIs from the public-apis reference instead of hallucinating.
     """
     import sys
     import os
     sys.path.insert(0, "/root")
     os.environ["LLM_PROVIDER"] = LLM_PROVIDER
     from mcp_builder import generate  # noqa: PLC0415
-    return generate(prompt, template)
+    return generate(prompt, template, api_context=api_context if api_context else None)
 
 
 # ── Syntax validation (runs locally) ──────────────────────────────────────────
@@ -233,9 +279,27 @@ def main(goal: str = ""):
         sys.exit(1)
     template = TEMPLATE_FILE.read_text()
 
+    # ── 3b. Resolve curated API candidates for each tool ──────────────────────
+    api_contexts: list[str] = []
+    if HAS_API_REFERENCE:
+        print("\n 🔍 Looking up curated APIs from public-apis reference …")
+        for t in tools:
+            candidates = get_best_apis(t["prompt"], top_n=5)
+            if candidates:
+                ctx = format_api_context(candidates)
+                api_contexts.append(ctx)
+                print(f"   {t['slug']}: found {len(candidates)} API(s) → "
+                      f"{', '.join(c['name'] for c in candidates[:3])}")
+            else:
+                api_contexts.append("")
+                print(f"   {t['slug']}: no curated APIs found, using LLM knowledge")
+    else:
+        print("\n ⚠ api_reference not available — using LLM knowledge only")
+        api_contexts = [""] * len(tools)
+
     # ── 4. Generate in parallel on Modal (with syntax-error retry) ────────────
     print(f"\n Generating {len(tools)} MCP server(s) in parallel on Modal …")
-    args = [(t["prompt"], template) for t in tools]
+    args = [(t["prompt"], template, ctx) for t, ctx in zip(tools, api_contexts)]
     generated_codes = list(build_one_mcp.starmap(args))
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -253,6 +317,52 @@ def main(goal: str = ""):
         print(f"\n  WARNING: {len(still_bad)} server(s) still have syntax errors after retries:")
         for i in still_bad:
             print(f"    - {tools[i]['slug']}")
+
+    # ── 4b. Confidence check + doc-scraping retry ─────────────────────────────
+    if HAS_API_REFERENCE:
+        print(f"\n 🔎 Checking confidence of generated code …")
+        low_confidence = []
+        for i, code in enumerate(generated_codes):
+            assessment = _assess_confidence(code)
+            if not assessment["confident"]:
+                low_confidence.append(i)
+                print(f"   ⚠ {tools[i]['slug']}: low confidence "
+                      f"(score={assessment['score']:.2f}) — {', '.join(assessment['reasons'])}")
+            else:
+                print(f"   ✓ {tools[i]['slug']}: confident (score={assessment['score']:.2f})")
+
+        if low_confidence:
+            print(f"\n 📄 Scraping API docs for {len(low_confidence)} low-confidence tool(s) …")
+            for i in low_confidence:
+                # Get API candidates for this tool
+                candidates = get_best_apis(tools[i]["prompt"], top_n=3)
+                if not candidates:
+                    print(f"   {tools[i]['slug']}: no API candidates, skipping")
+                    continue
+
+                # Scrape actual documentation
+                docs = scrape_docs_for_apis(candidates, max_apis=2)
+                if not docs:
+                    print(f"   {tools[i]['slug']}: doc scraping failed, keeping original")
+                    continue
+
+                # Build enriched context with real docs
+                docs_context = format_api_context_with_docs(candidates, docs)
+                print(f"   {tools[i]['slug']}: got docs for {len(docs)} API(s), re-generating …")
+
+                # Re-generate this single tool with doc context
+                retry_code = build_one_mcp.remote(
+                    tools[i]["prompt"], template, docs_context
+                )
+
+                retry_assessment = _assess_confidence(retry_code)
+                if retry_assessment["score"] >= _assess_confidence(generated_codes[i])["score"]:
+                    generated_codes[i] = retry_code
+                    print(f"   ✓ {tools[i]['slug']}: improved to score={retry_assessment['score']:.2f}")
+                else:
+                    print(f"   {tools[i]['slug']}: doc retry didn't improve, keeping original")
+        else:
+            print(f"   All tools passed confidence check!")
 
     # ── 5. Save files ──────────────────────────────────────────────────────────
     OUTPUT_DIR.mkdir(exist_ok=True)
