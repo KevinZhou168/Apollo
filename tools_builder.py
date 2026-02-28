@@ -40,9 +40,36 @@ import os
 
 dotenv.load_dotenv()
 
+# ── Public-APIs fallback reference ─────────────────────────────────────────────
+try:
+    from api_reference import (
+        get_best_apis, format_api_context,
+        scrape_docs_for_apis, format_api_context_with_docs,
+    )
+    HAS_API_REFERENCE = True
+except ImportError:
+    HAS_API_REFERENCE = False
+
+# ── Confidence assessment (same heuristics as mcp_builder) ─────────────────────
+
+_SUSPICIOUS_DOMAINS = ["example.com", "fakeapi", "placeholder", "dummyapi", "mockapi"]
+
+def _assess_confidence(code: str) -> dict:
+    """Quick confidence check on generated code (runs locally, no LLM)."""
+    import re
+    score, reasons = 1.0, []
+    if not valid_syntax(code):
+        score -= 0.5; reasons.append("syntax errors")
+    if not any(re.search(p, code) for p in [r"requests\.(get|post|put|patch|delete)", r"httpx\.", r"aiohttp\."]):
+        score -= 0.3; reasons.append("no API calls")
+    if any(d in code.lower() for d in _SUSPICIOUS_DOMAINS):
+        score -= 0.4; reasons.append("suspicious URLs")
+    return {"confident": score >= 0.7 and len(reasons) == 0, "score": max(0.0, score), "reasons": reasons}
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+# LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+LLM_PROVIDER = "openai"
 if LLM_PROVIDER not in ("anthropic", "openai"):
     print(f"Error: LLM_PROVIDER must be 'anthropic' or 'openai', got '{LLM_PROVIDER}'", file=sys.stderr)
     sys.exit(1)
@@ -85,6 +112,7 @@ Rules:
 - Produce between 2 and 6 servers; pick the most impactful ones for the goal.
 - Each server should have a single, coherent responsibility.
 - Do not repeat functionality across servers.
+- ALWAYS specify a concrete, real public API for each server to use. Do NOT leave the API choice vague.
 """
 
 def plan_tools(goal: str) -> list[dict]:
@@ -113,10 +141,27 @@ def plan_tools(goal: str) -> list[dict]:
             ],
         )
         raw = message.choices[0].message.content.strip()
+
+    # ── Robustly parse JSON from the LLM output ──────────────────────────
+    # Strip markdown code fences
     if raw.startswith("```"):
         raw = re.sub(r"^```[^\n]*\n", "", raw)
         raw = re.sub(r"\n```\s*$", "", raw)
-    return json.loads(raw)
+
+    # Extract just the JSON array if there's extra text around it
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if match:
+        raw = match.group(0)
+
+    # Remove trailing commas before ] or } (common LLM mistake)
+    raw = re.sub(r",\s*([}\]])", r"\1", raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"  [plan_tools] JSON parse failed: {e}")
+        print(f"  [plan_tools] Raw output (first 500 chars): {raw[:500]}")
+        raise
 
 
 # ── Modal worker (runs in parallel on Modal) ───────────────────────────────────
@@ -126,9 +171,11 @@ def plan_tools(goal: str) -> list[dict]:
     secrets=secrets_list,
     timeout=300,
 )
-def build_mcp_and_tests(prompt: str, template: str) -> tuple[str, str]:
+def build_mcp_and_tests(prompt: str, template: str, api_context: str = "") -> tuple[str, str]:
     """
     Runs on a Modal worker. Generates one complete MCP server and its test script.
+    If api_context is provided, it is injected into the system prompt so the LLM
+    uses real, curated APIs from the public-apis reference instead of hallucinating.
     Returns (mcp_code, test_code).
     """
     import sys
@@ -136,7 +183,7 @@ def build_mcp_and_tests(prompt: str, template: str) -> tuple[str, str]:
     sys.path.insert(0, "/root")
     os.environ["LLM_PROVIDER"] = LLM_PROVIDER
     from mcp_builder import generate, generate_tests  # noqa: PLC0415
-    code = generate(prompt, template)
+    code = generate(prompt, template, api_context=api_context if api_context else None)
     test_code = generate_tests(code)
     return code, test_code
 
@@ -289,11 +336,28 @@ def main(goal: str = ""):
         sys.exit(1)
     template = TEMPLATE_FILE.read_text()
 
+    # ── 3b. Resolve curated API candidates for each tool ──────────────────────
+    api_contexts: list[str] = []
+    if HAS_API_REFERENCE:
+        print("\n Looking up curated APIs from public-apis reference …")
+        for t in tools:
+            candidates = get_best_apis(t["prompt"], top_n=5)
+            if candidates:
+                ctx = format_api_context(candidates)
+                api_contexts.append(ctx)
+                print(f"   {t['slug']}: found {len(candidates)} API(s) → "
+                      f"{', '.join(c['name'] for c in candidates[:3])}")
+            else:
+                api_contexts.append("")
+                print(f"   {t['slug']}: no curated APIs found, using LLM knowledge")
+    else:
+        print("\n  api_reference not available — using LLM knowledge only")
+        api_contexts = [""] * len(tools)
+
     # ── 4. Generate code + tests in parallel on Modal ─────────────────────────
     print(f"\n Generating {len(tools)} MCP server(s) + tests in parallel on Modal …")
-    args = [(t["prompt"], template) for t in tools]
-    raw_results = list(build_mcp_and_tests.starmap(args))
-    generated = list(raw_results)  # list of (code, test_code)
+    args = [(t["prompt"], template, ctx) for t, ctx in zip(tools, api_contexts)]
+    generated = list(build_mcp_and_tests.starmap(args))  # list of (code, test_code)
 
     # ── 5. Batch syntax check + retry (fast pre-check before deploying) ────────
     for attempt in range(1, MAX_RETRIES + 1):
@@ -305,6 +369,13 @@ def main(goal: str = ""):
         retry_results = list(build_mcp_and_tests.starmap([args[i] for i in bad]))
         for i, result in zip(bad, retry_results):
             generated[i] = result
+
+    # report any still failing after all retries
+    still_bad = [i for i, (code, _) in enumerate(generated) if not valid_syntax(code)]
+    if still_bad:
+        print(f"\n  WARNING: {len(still_bad)} server(s) still have syntax errors after retries:")
+        for i in still_bad:
+            print(f"    - {tools[i]['slug']}")
 
     # ── 6. Per-MCP: deploy → test → interpret → retry ─────────────────────────
     OUTPUT_DIR.mkdir(exist_ok=True)
