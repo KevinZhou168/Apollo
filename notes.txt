@@ -1,0 +1,32 @@
+how to run tool builder:
+modal run tool_builder.py --goal "plan a trip to spain"
+
+super useful docs for mcp server creation and deployment:
+https://modal.com/docs/examples/mcp_server_stateless
+
+============================================================================================================================
+
+# curl requests for an MCP
+curl -N -X POST https://dhanishnatarajan--example-mcp-server-stateless-web.modal.run/mcp/ \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}'
+
+
+curl -N -X POST https://dhanishnatarajan--example-mcp-server-stateless-web.modal.run/mcp/ -H "Content-Type: application/json" -H "Accept: application/json, 
+  text/event-stream" -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "current_date_and_time", "arguments": {"timezone": "America/Chicago"}}}' 
+
+
+curl -N -X POST https://dhanishnatarajan--live-weather-mcp-server-web.modal.run/mcp/ -H "Content-Type: application/json" -H "Accept: application/json, 
+  text/event-stream" -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "current_date_and_time", "arguments": {"timezone": "America/Chicago"}}}'
+
+curl -N -X POST https://dhanishnatarajan--geopolitical-news-mcp-web.modal.run/mcp/ \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}'
+
+============================================================================================================================
+# test mcp on inspector
+npx @modelcontextprotocol/inspector
+
+modal secret create anthropic-secret ANTHROPIC_API_KEY=sk-ant-…
