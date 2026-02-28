@@ -1,5 +1,10 @@
+pip install modal anthropic
+modal setup
+
+export ANTHROPIC_API_KEY=
+
 how to run tool builder:
-modal run tool_builder.py --goal "plan a trip to spain"
+modal run tools_builder.py --goal "plan a trip to spain"
 
 super useful docs for mcp server creation and deployment:
 https://modal.com/docs/examples/mcp_server_stateless
