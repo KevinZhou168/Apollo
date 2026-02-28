@@ -40,6 +40,32 @@ import os
 
 dotenv.load_dotenv()
 
+# ── Terminal styling ───────────────────────────────────────────────────────────
+_R   = "\033[0m"   # reset
+_B   = "\033[1m"   # bold
+_DIM = "\033[2m"   # dim
+_C   = "\033[96m"  # bright cyan
+_G   = "\033[92m"  # bright green
+_Y   = "\033[93m"  # bright yellow
+_RE  = "\033[91m"  # bright red
+_BL  = "\033[94m"  # bright blue
+_M   = "\033[95m"  # bright magenta
+
+def _sec(title: str) -> str:
+    """Styled section header."""
+    bar = "─" * (50 - len(title) - 1)
+    return f"\n{_C}{_B}◆ {title}{_R}{_DIM} {bar}{_R}"
+
+def _mcp_header(idx: int, total: int, slug: str) -> str:
+    """Styled per-MCP box header."""
+    label = f"  [{idx}/{total}]  {slug}"
+    pad   = 50 - len(label)
+    return (
+        f"\n{_BL}┌{'─' * 52}┐\n"
+        f"│{_B}{label}{_R}{_BL}{' ' * pad}│\n"
+        f"└{'─' * 52}┘{_R}"
+    )
+
 # ── Public-APIs fallback reference ─────────────────────────────────────────────
 try:
     from api_reference import (
@@ -73,7 +99,7 @@ LLM_PROVIDER = "openai"
 if LLM_PROVIDER not in ("anthropic", "openai"):
     print(f"Error: LLM_PROVIDER must be 'anthropic' or 'openai', got '{LLM_PROVIDER}'", file=sys.stderr)
     sys.exit(1)
-print(f"Using LLM Provider: {LLM_PROVIDER}")
+print(f"{_DIM}  provider · {LLM_PROVIDER}{_R}")
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -232,12 +258,12 @@ def make_room_for(n: int) -> None:
         return
 
     to_stop = deployed[:excess]
-    print(f"\n  At the {ENDPOINT_LIMIT}-endpoint limit. "
-          f"Stopping {len(to_stop)} oldest app(s) to make room:")
+    print(f"\n{_Y}  ⚠  endpoint limit reached ({ENDPOINT_LIMIT} max) — "
+          f"stopping {len(to_stop)} oldest app(s){_R}")
     for a in to_stop:
         name = a.get("Description", a.get("App ID", "?"))
         app_id = a.get("App ID", "")
-        print(f"    Stopping: {name} ({app_id})")
+        print(f"  {_DIM}  ↓ {name} ({app_id}){_R}")
         subprocess.run(["modal", "app", "stop", app_id], check=False)
 
 
@@ -246,15 +272,15 @@ def make_room_for(n: int) -> None:
 def deploy_file(filepath: Path) -> tuple[bool, str | None]:
     """Deploy a file with `modal deploy`. Returns (success, endpoint_url)."""
     if not shutil.which("modal"):
-        print(f"    [!] `modal` CLI not found — skipping deploy of {filepath.name}")
+        print(f"  {_RE}  ✗  modal CLI not found — skipping {filepath.name}{_R}")
         return False, None
-    print(f"    Deploying {filepath.name} …")
+    print(f"  {_DIM}  deploying {filepath.name} …{_R}")
     result = subprocess.run(
         ["modal", "deploy", str(filepath)],
         capture_output=True, text=True,
     )
     output = result.stdout + result.stderr
-    print(output)
+    print(_DIM + output + _R)
     url = None
     if result.returncode == 0:
         match = re.search(r"https://[a-z0-9-]+--[a-z0-9-]+-web\.modal\.run", output)
@@ -277,10 +303,10 @@ def stop_app_by_name(app_name: str) -> None:
         if a.get("Description", "") == app_name:
             app_id = a.get("App ID", "")
             if app_id:
-                print(f"    Stopping app '{app_name}' ({app_id}) …")
+                print(f"  {_DIM}  ↓ stopping {app_name} ({app_id}){_R}")
                 subprocess.run(["modal", "app", "stop", app_id], check=False)
                 return
-    print(f"    [!] Could not find deployed app '{app_name}' to stop")
+    print(f"  {_Y}  ⚠  could not find '{app_name}' to stop{_R}")
 
 
 # ── Test runner (runs locally) ─────────────────────────────────────────────────
@@ -312,23 +338,27 @@ MAX_DEPLOY_ATTEMPTS = 2  # 1 retry per MCP (attempt 1 + attempt 2)
 @app.local_entrypoint()
 def main(goal: str = ""):
     # ── 1. Get goal ────────────────────────────────────────────────────────────
+    print(f"\n{_C}{_B}╔══════════════════════════════════════════════════╗{_R}")
+    print(f"{_C}{_B}║  ⚡  ATLAS  ·  MCP Server Factory                ║{_R}")
+    print(f"{_C}{_B}╚══════════════════════════════════════════════════╝{_R}")
     if not goal:
-        print("Describe your high-level goal (e.g. 'plan a trip to spain'):")
-        goal = input("Goal: ").strip()
+        print(f"\n{_B}  Describe your goal{_R} {_DIM}(e.g. 'plan a trip to spain'){_R}")
+        goal = input(f"{_C}  › {_R}").strip()
     if not goal:
-        print("No goal provided.", file=sys.stderr)
+        print(f"{_RE}  ✗  no goal provided{_R}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\n Goal: {goal}")
+    print(f"\n  {_B}goal{_R}  {goal}")
 
     # ── 2. Plan tools ──────────────────────────────────────────────────────────
-    print("\n Planning MCP servers …")
+    print(_sec("PLANNING"))
+    print(f"  decomposing goal into MCP servers…")
     tools = plan_tools(goal)
 
-    print(f"\n Will build {len(tools)} MCP server(s):")
+    print(f"\n  {_B}{len(tools)} server(s){_R} to build:")
     for i, t in enumerate(tools, 1):
-        print(f"   {i}. {t['slug']}")
-        print(f"      {t['prompt'][:120]}{'…' if len(t['prompt']) > 120 else ''}")
+        print(f"  {_C}  {i}{_R}  {_B}{t['slug']}{_R}")
+        print(f"  {_DIM}     {t['prompt'][:120]}{'…' if len(t['prompt']) > 120 else ''}{_R}")
 
     # ── 3. Load template once ──────────────────────────────────────────────────
     if not TEMPLATE_FILE.exists():
@@ -339,33 +369,35 @@ def main(goal: str = ""):
     # ── 3b. Resolve curated API candidates for each tool ──────────────────────
     api_contexts: list[str] = []
     if HAS_API_REFERENCE:
-        print("\n Looking up curated APIs from public-apis reference …")
+        print(_sec("API LOOKUP"))
         for t in tools:
             candidates = get_best_apis(t["prompt"], top_n=5)
             if candidates:
                 ctx = format_api_context(candidates)
                 api_contexts.append(ctx)
-                print(f"   {t['slug']}: found {len(candidates)} API(s) → "
-                      f"{', '.join(c['name'] for c in candidates[:3])}")
+                names = ", ".join(c["name"] for c in candidates[:3])
+                print(f"  {_BL}  {t['slug']}{_R}  {_DIM}→  {len(candidates)} API(s)  ·  {names}{_R}")
             else:
                 api_contexts.append("")
-                print(f"   {t['slug']}: no curated APIs found, using LLM knowledge")
+                print(f"  {_DIM}  {t['slug']}  →  no curated APIs found, using LLM knowledge{_R}")
     else:
-        print("\n  api_reference not available — using LLM knowledge only")
+        print(f"\n{_Y}  ⚠  api_reference not available — using LLM knowledge only{_R}")
         api_contexts = [""] * len(tools)
 
     # ── 4. Generate code + tests in parallel on Modal ─────────────────────────
-    print(f"\n Generating {len(tools)} MCP server(s) + tests in parallel on Modal …")
+    print(_sec("GENERATING"))
+    print(f"  spinning up {_B}{len(tools)}{_R} Modal workers  {_DIM}(code + tests in parallel)…{_R}")
     args = [(t["prompt"], template, ctx) for t, ctx in zip(tools, api_contexts)]
     generated = list(build_mcp_and_tests.starmap(args))  # list of (code, test_code)
 
     # ── 5. Batch syntax check + retry (fast pre-check before deploying) ────────
+    print(_sec("SYNTAX CHECK"))
     for attempt in range(1, MAX_RETRIES + 1):
         bad = [i for i, (code, _) in enumerate(generated) if not valid_syntax(code)]
         if not bad:
             break
-        print(f"\n  {len(bad)} server(s) had syntax errors — retrying "
-              f"(attempt {attempt}/{MAX_RETRIES}) …")
+        print(f"  {_Y}  ⚠  {len(bad)} server(s) had syntax errors — "
+              f"retrying (pass {attempt}/{MAX_RETRIES})…{_R}")
         retry_results = list(build_mcp_and_tests.starmap([args[i] for i in bad]))
         for i, result in zip(bad, retry_results):
             generated[i] = result
@@ -373,9 +405,11 @@ def main(goal: str = ""):
     # report any still failing after all retries
     still_bad = [i for i, (code, _) in enumerate(generated) if not valid_syntax(code)]
     if still_bad:
-        print(f"\n  WARNING: {len(still_bad)} server(s) still have syntax errors after retries:")
+        print(f"  {_RE}  ✗  {len(still_bad)} server(s) still failing after retries:{_R}")
         for i in still_bad:
-            print(f"    - {tools[i]['slug']}")
+            print(f"  {_DIM}    · {tools[i]['slug']}{_R}")
+    else:
+        print(f"  {_G}  ✓  all {len(generated)} servers passed{_R}")
 
     # ── 6. Per-MCP: deploy → test → interpret → retry ─────────────────────────
     OUTPUT_DIR.mkdir(exist_ok=True)
@@ -391,9 +425,7 @@ def main(goal: str = ""):
         filename  = f"{idx}_{slug}_mcp.py"
         filepath  = OUTPUT_DIR / filename
 
-        print(f"\n {'─' * 52}")
-        print(f"  [{idx}/{len(tools)}] {slug}")
-        print(f" {'─' * 52}")
+        print(_mcp_header(idx, len(tools), slug))
 
         current_code   = code
         current_tests  = test_code
@@ -401,13 +433,13 @@ def main(goal: str = ""):
         final_status   = None
 
         for attempt in range(1, MAX_DEPLOY_ATTEMPTS + 1):
-            print(f"\n   Attempt {attempt}/{MAX_DEPLOY_ATTEMPTS}")
+            print(f"\n  {_DIM}  ↳ attempt {attempt}/{MAX_DEPLOY_ATTEMPTS}{_R}")
 
             # Syntax guard on retried code
             if not valid_syntax(current_code):
-                print(f"   Syntax error — cannot deploy.")
+                print(f"  {_RE}    ✗  syntax error — cannot deploy{_R}")
                 if attempt < MAX_DEPLOY_ATTEMPTS:
-                    print(f"   Regenerating …")
+                    print(f"  {_Y}    ↺  regenerating…{_R}")
                     current_code, current_tests = build_mcp_and_tests.remote(
                         current_prompt, template
                     )
@@ -419,27 +451,31 @@ def main(goal: str = ""):
             ok, endpoint_url = deploy_file(filepath)
 
             if not ok or not endpoint_url:
-                print(f"   Deploy failed.")
+                print(f"  {_RE}    ✗  deploy failed{_R}")
                 if attempt < MAX_DEPLOY_ATTEMPTS:
                     continue
                 final_status = "skipped (failed after retries)"
                 break
 
-            print(f"   Endpoint: {endpoint_url}")
-            print(f"   Running tests …")
+            print(f"  {_BL}    ⬡  endpoint  {endpoint_url}{_R}")
+            print(f"  {_DIM}    running tests…{_R}")
             test_output = run_tests_locally(endpoint_url, current_tests)
             preview = test_output[:600] + ("…" if len(test_output) > 600 else "")
-            print(f"   Test output:\n{preview}")
+            print(f"{_DIM}{preview}{_R}")
 
-            print(f"   Interpreting results …")
+            print(f"  {_DIM}    interpreting results…{_R}")
             interpretation = interpret_results(test_output, current_code, current_prompt)
             verdict  = interpretation.get("verdict", "code_bug")
             reason   = interpretation.get("reason", "")
-            print(f"   Verdict: {verdict} — {reason}")
 
             if verdict == "valid":
+                print(f"  {_G}    ✓  valid{_R}  {_DIM}─  {reason}{_R}")
                 final_status = "deployed"
                 break
+            elif verdict == "transient":
+                print(f"  {_Y}    ⚠  transient{_R}  {_DIM}─  {reason}{_R}")
+            else:
+                print(f"  {_RE}    ✗  code_bug{_R}  {_DIM}─  {reason}{_R}")
 
             # Not valid — tear down the app before deciding what to do
             app_name = extract_app_name(current_code)
@@ -454,7 +490,7 @@ def main(goal: str = ""):
             # code_bug
             if attempt < MAX_DEPLOY_ATTEMPTS:
                 adjusted = interpretation.get("adjusted_prompt") or current_prompt
-                print(f"   Regenerating with adjusted prompt …")
+                print(f"  {_Y}    ↺  regenerating with adjusted prompt…{_R}")
                 current_code, current_tests = build_mcp_and_tests.remote(
                     adjusted, template
                 )
@@ -468,10 +504,21 @@ def main(goal: str = ""):
         summary.append((slug, final_status))
 
     # ── 7. Summary ─────────────────────────────────────────────────────────────
-    print("\n" + "━" * 56)
-    print("  Summary")
-    print("━" * 56)
+    deployed  = [(n, s) for n, s in summary if s == "deployed"]
+    transient = [(n, s) for n, s in summary if "external" in s]
+    failed    = [(n, s) for n, s in summary if "retries" in s]
+
+    print(f"\n{_C}{_B}{'━' * 54}{_R}")
+    print(f"{_C}{_B}  RESULTS  ·  {len(summary)} servers processed{_R}")
+    print(f"{_C}{_B}{'━' * 54}{_R}")
     for name, status in summary:
-        print(f"  [{status}] {name}")
-    print("━" * 56)
-    print(f"\n  Generated files: {OUTPUT_DIR}/")
+        if status == "deployed":
+            icon, col = "✓", _G
+        elif "external" in status:
+            icon, col = "⚠", _Y
+        else:
+            icon, col = "✗", _RE
+        label = status.replace("skipped (", "").rstrip(")")
+        print(f"  {col}{_B}{icon}{_R}  {_B}{name}{_R}  {_DIM}{label}{_R}")
+    print(f"{_C}{_B}{'━' * 54}{_R}")
+    print(f"\n  {_DIM}files saved to  {OUTPUT_DIR}/{_R}")

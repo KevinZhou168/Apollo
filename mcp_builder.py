@@ -344,9 +344,10 @@ def generate(
         return code
 
     # ── Phase 4: Fallback level 1 — API names + links from reference ────────
-    print(f"  [mcp_builder] Low confidence (score={assessment['score']:.2f}): "
-          f"{', '.join(assessment['reasons'])}")
-    print(f"  [mcp_builder] Falling back to public-apis reference …")
+    _y = "\033[93m"; _r = "\033[0m"; _d = "\033[2m"; _g = "\033[92m"; _b = "\033[94m"
+    print(f"  {_y}⚠  low confidence{_r}  {_d}score={assessment['score']:.2f}  ·  "
+          f"{', '.join(assessment['reasons'])}{_r}")
+    print(f"  {_d}↳ consulting public-apis reference…{_r}")
 
     try:
         from api_reference import (
@@ -356,36 +357,35 @@ def generate(
 
         candidates = get_best_apis(prompt, top_n=5)
         if not candidates:
-            print(f"  [mcp_builder] No relevant APIs found in reference. Using original.")
+            print(f"  {_d}  no relevant APIs found — keeping original{_r}")
             return code
 
         # Level 1: retry with just API names/descriptions (no doc scraping)
         ref_context = format_api_context(candidates)
         system_with_ref = system + API_REFERENCE_ADDENDUM.format(api_context=ref_context)
 
-        print(f"  [mcp_builder] Found {len(candidates)} API candidate(s). Re-generating …")
+        print(f"  {_b}  found {len(candidates)} API candidate(s) — re-generating…{_r}")
         for c in candidates:
-            print(f"    → {c['name']} ({c['category']}) — {c['link']}")
+            print(f"  {_d}    → {c['name']} ({c['category']})  {c['link']}{_r}")
 
         fallback_code = _call_llm(system_with_ref, user_msg)
         fallback_assessment = assess_confidence(fallback_code)
 
         if fallback_assessment["confident"]:
-            print(f"  [mcp_builder] Fallback improved confidence: "
-                  f"{assessment['score']:.2f} → {fallback_assessment['score']:.2f}")
+            print(f"  {_g}  ✓ confidence improved: "
+                  f"{assessment['score']:.2f} → {fallback_assessment['score']:.2f}{_r}")
             return fallback_code
 
         # ── Phase 5: Fallback level 2 — scrape actual API docs ────────────
-        print(f"  [mcp_builder] Level 1 fallback still low confidence "
-              f"(score={fallback_assessment['score']:.2f}). Scraping API docs …")
+        print(f"  {_y}  still low confidence ({fallback_assessment['score']:.2f}) "
+              f"— scraping API docs…{_r}")
 
         docs = scrape_docs_for_apis(candidates, max_apis=3)
         if docs:
             docs_context = format_api_context_with_docs(candidates, docs)
             system_with_docs = system + API_REFERENCE_ADDENDUM.format(api_context=docs_context)
 
-            print(f"  [mcp_builder] Scraped docs for {len(docs)} API(s). "
-                  f"Re-generating with documentation …")
+            print(f"  {_b}  scraped docs for {len(docs)} API(s) — re-generating…{_r}")
 
             docs_code = _call_llm(system_with_docs, user_msg)
             docs_assessment = assess_confidence(docs_code)
@@ -397,19 +397,19 @@ def generate(
             if docs_assessment["score"] > best_score:
                 best_code, best_score = docs_code, docs_assessment["score"]
 
-            print(f"  [mcp_builder] Best confidence across all attempts: {best_score:.2f}")
+            print(f"  {_g}  ✓ best confidence across all attempts: {best_score:.2f}{_r}")
             return best_code
         else:
-            print(f"  [mcp_builder] Doc scraping failed. Using best previous result.")
+            print(f"  {_y}  doc scraping failed — keeping best previous result{_r}")
             if fallback_assessment["score"] >= assessment["score"]:
                 return fallback_code
             return code
 
     except ImportError:
-        print(f"  [mcp_builder] api_reference module not available. Using original.")
+        print(f"  {_d}  api_reference not available — using original{_r}")
         return code
     except Exception as e:
-        print(f"  [mcp_builder] Fallback error: {e}. Using original.")
+        print(f"  {_y}  fallback error: {e} — using original{_r}")
         return code
 
 
