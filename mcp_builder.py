@@ -12,6 +12,7 @@ Quick start:
     print(code)
 """
 
+import json
 import os
 import re
 from pathlib import Path
@@ -59,12 +60,30 @@ STRICT RULES — never break these
 
 4.  NEVER hardcode large datasets, lookup tables, or reference data inside a tool body.
     Every tool must fetch live data from an external API or compute values dynamically.
-    If no suitable free API exists, make the tool call a well-known public API and note
-    which one in the docstring — do not substitute hardcoded dict/list literals.
     Every string literal must fit on one line (< 120 chars); use triple-quoted strings
     only for docstrings, never for data payloads.
 
-5.  Do not add Modal secrets, volumes, GPU config, or scheduled functions unless the prompt specifically requires them.
+5.  ██ API KEY RULE — this is the most important rule after rule 1 ██
+    ALWAYS use free, public APIs that require NO API key unless the prompt explicitly
+    says an API key is available or tells you to use a specific authenticated service.
+
+    - If the prompt does not mention an API key: you MUST pick a keyless public API.
+    - NEVER use OpenWeatherMap, Google Maps, Yelp, Foursquare, Ticketmaster, or any
+      other service that gates access behind a key registration, unless the prompt
+      explicitly instructs you to.
+    - Preferred keyless APIs (use these by default. if not, use other public apis that require no key):
+        weather          → open-meteo.com  (no key, free forever)
+        geocoding        → nominatim.openstreetmap.org  (no key)
+        maps / places    → overpass-api.de  (OpenStreetMap, no key)
+        exchange rates   → open.er-api.com  (no key for latest rates)
+        public holidays  → date.nager.at  (no key)
+        IP geolocation   → ip-api.com  (no key, HTTP only)
+        astronomy        → api.open-notify.org  (no key)
+        trivia / facts   → opentdb.com, uselessfacts.jsph.pl  (no key)
+        news headlines   → gnews.io free tier requires a key — use rss feeds instead
+    - When you choose an API, confirm in a comment that it requires no key.
+
+6.  Do not add Modal secrets, volumes, GPU config, or scheduled functions unless the prompt specifically requires them.
 
 6.  The make_mcp_server() function must end with `return mcp`.
 
@@ -153,3 +172,171 @@ def generate(prompt: str, template: str | None = None) -> str:
             ],
         )
         return strip_fences(message.choices[0].message.content)
+
+
+# ── Test generation ───────────────────────────────────────────────────────────
+
+TEST_SYSTEM_PROMPT = """You are an expert Python developer writing integration tests for a FastMCP server deployed on Modal.
+
+Given the source code of an MCP server, produce a complete Python test script that validates every tool.
+The script must only use the Python standard library plus `requests` — do NOT import fastmcp, asyncio, or any other package.
+
+CALLING TOOLS — use this exact helper (copy it verbatim into every test script):
+
+def call_tool(base_url, tool_name, arguments):
+    import requests, json
+    resp = requests.post(
+        f"{base_url}/mcp/",
+        json={"jsonrpc": "2.0", "method": "tools/call",
+              "params": {"name": tool_name, "arguments": arguments}, "id": 1},
+        headers={"Content-Type": "application/json",
+                 "Accept": "application/json, text/event-stream"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    ct = resp.headers.get("content-type", "")
+    if "event-stream" in ct:
+        for line in resp.text.splitlines():
+            if line.startswith("data: ") and line.strip() != "data:":
+                data = json.loads(line[6:])
+                if "result" in data:
+                    content = data["result"].get("content", [])
+                    return " ".join(c.get("text", str(c)) for c in content)
+        return None
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(data["error"])
+    content = data.get("result", {}).get("content", [])
+    return " ".join(c.get("text", str(c)) for c in content)
+
+REQUIREMENTS:
+1. Accept the server's base URL as sys.argv[1].
+2. Include the call_tool helper above verbatim.
+3. Test every @mcp.tool() function at least once with realistic, non-trivial arguments.
+4. Print each result clearly: print(f"[tool_name] result: {result}")
+5. Catch ALL exceptions per-tool and print them: print(f"[tool_name] ERROR: {e}")
+6. Never let a single tool failure crash the whole script — always continue to the next tool.
+7. Print a final summary listing which tools passed and which raised errors.
+8. Always exit with code 0 — the LLM will judge the output, not the exit code.
+
+STRICT RULES:
+- Output ONLY raw Python code. No markdown fences, no explanations.
+- Synchronous code only — no async, no asyncio.
+- All imports (requests, json, sys) at the top of the file.
+- Use realistic test arguments (e.g. "Chicago" for cities, real near-future dates for dates, positive numbers for quantities).
+- Never pass empty strings or None unless a parameter has a default value.
+"""
+
+
+def generate_tests(mcp_code: str) -> str:
+    """
+    Generate an integration test script for a given MCP server's source code.
+
+    Args:
+        mcp_code: The full Python source of the generated MCP server.
+
+    Returns:
+        A Python test script as a string.
+    """
+    user = f"Generate integration tests for this MCP server:\n\n{mcp_code}"
+
+    if LLM_PROVIDER == "anthropic":
+        client = anthropic.Anthropic()
+        message = client.messages.create(
+            model=MODEL,
+            max_tokens=4096,
+            system=TEST_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user}],
+        )
+        return strip_fences(message.content[0].text)
+    else:
+        import openai
+        client = openai.OpenAI()
+        message = client.chat.completions.create(
+            model=MODEL,
+            max_completion_tokens=4096,
+            messages=[
+                {"role": "system", "content": TEST_SYSTEM_PROMPT},
+                {"role": "user", "content": user},
+            ],
+        )
+        return strip_fences(message.choices[0].message.content)
+
+
+# ── Result interpretation ─────────────────────────────────────────────────────
+
+INTERPRETER_SYSTEM_PROMPT = """You are analyzing integration test output from a deployed MCP server to classify whether it is working correctly.
+
+You will receive:
+1. The original prompt used to generate the server.
+2. The server's Python source code.
+3. The stdout/stderr captured from running tests against the live endpoint.
+
+Classify the outcome as exactly one of three verdicts:
+
+"valid"     — Most tools returned real, sensible data. Minor issues (one flaky tool,
+              slightly unexpected format) are acceptable. Mark valid if the server is
+              genuinely useful.
+
+"transient" — Failures are clearly due to external factors outside the code: network
+              timeouts, third-party API rate limits or downtime, services requiring API
+              keys that aren't provided. Retrying with different code won't help.
+
+"code_bug"  — The code itself is broken: import errors, wrong API endpoints, logic
+              errors, tools always returning empty/None/error, incorrect argument
+              handling. A code fix would resolve this.
+
+Respond with ONLY valid JSON — no markdown, no commentary:
+{
+  "verdict": "valid" | "transient" | "code_bug",
+  "reason": "one or two sentences explaining the classification",
+  "adjusted_prompt": "<original prompt with appended fix instructions>" or null
+}
+
+Set adjusted_prompt only when verdict is "code_bug": take the original prompt and
+append a clear, specific instruction describing what failed and what to fix.
+For "valid" and "transient", set adjusted_prompt to null.
+"""
+
+
+def interpret_results(test_output: str, mcp_code: str, original_prompt: str) -> dict:
+    """
+    Use an LLM to classify test output as valid / transient / code_bug.
+
+    Args:
+        test_output:     Captured stdout+stderr from the test script.
+        mcp_code:        The MCP server source that was tested.
+        original_prompt: The prompt originally used to generate the server.
+
+    Returns:
+        Dict with keys: verdict, reason, adjusted_prompt.
+    """
+    user = (
+        f"Original prompt:\n{original_prompt}\n\n"
+        f"MCP server code:\n{mcp_code}\n\n"
+        f"Test output:\n{test_output}"
+    )
+
+    if LLM_PROVIDER == "anthropic":
+        client = anthropic.Anthropic()
+        message = client.messages.create(
+            model=MODEL,
+            max_tokens=1024,
+            system=INTERPRETER_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user}],
+        )
+        raw = message.content[0].text.strip()
+    else:
+        import openai
+        client = openai.OpenAI()
+        message = client.chat.completions.create(
+            model=MODEL,
+            max_completion_tokens=1024,
+            messages=[
+                {"role": "system", "content": INTERPRETER_SYSTEM_PROMPT},
+                {"role": "user", "content": user},
+            ],
+        )
+        raw = message.choices[0].message.content.strip()
+
+    return json.loads(strip_fences(raw))

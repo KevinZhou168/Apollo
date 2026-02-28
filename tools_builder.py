@@ -8,12 +8,16 @@ Usage:
 How it works:
     1. Claude breaks your goal into several specific MCP server descriptions.
     2. Each description is sent to a Modal worker in parallel.
-    3. Every worker calls Claude to generate a complete, ready-to-deploy MCP server.
-    4. Files are saved to ./generated_mcps/ as  1_<slug>_mcp.py, 2_<slug>_mcp.py, …
-    5. Each file is deployed with `modal deploy`.
+    3. Every worker calls Claude to generate a complete MCP server AND its test script.
+    4. Each server is deployed with `modal deploy`, then its tests are run locally.
+    5. An LLM interprets the test results:
+         - "valid"     → keep the deployment, save the file.
+         - "transient" → external failure (API down, rate-limited); skip without retry.
+         - "code_bug"  → stop the app, adjust the prompt, retry (up to MAX_DEPLOY_ATTEMPTS).
+    6. After MAX_DEPLOY_ATTEMPTS failures the server is skipped entirely.
 
 Prerequisites:
-    - ANTHROPIC_API_KEY set locally (for the planning step).
+    - ANTHROPIC_API_KEY set locally (for planning and interpretation steps).
     - A Modal secret named "anthropic-secret" with ANTHROPIC_API_KEY
       (for the parallel generation workers).
       Create it once with:
@@ -26,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import anthropic
@@ -37,7 +42,7 @@ dotenv.load_dotenv()
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER","openai").lower()
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
 if LLM_PROVIDER not in ("anthropic", "openai"):
     print(f"Error: LLM_PROVIDER must be 'anthropic' or 'openai', got '{LLM_PROVIDER}'", file=sys.stderr)
     sys.exit(1)
@@ -45,9 +50,9 @@ print(f"Using LLM Provider: {LLM_PROVIDER}")
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-HERE         = Path(__file__).parent
+HERE          = Path(__file__).parent
 TEMPLATE_FILE = HERE / "mcp_template.py"
-OUTPUT_DIR   = HERE / "generated_mcps"
+OUTPUT_DIR    = HERE / "generated_mcps"
 
 # ── Modal image & app ──────────────────────────────────────────────────────────
 
@@ -70,11 +75,12 @@ PLANNER_SYSTEM = """You are an expert at decomposing a high-level user goal into
 Given a goal, output a JSON array.  Each element is an object with exactly two keys:
   "slug"   — a short snake_case identifier for the server (e.g. "weather", "flight_search")
   "prompt" — a detailed, specific prompt (3-5 sentences) describing what that MCP server
-             should do and which tools it needs.  The prompt will be fed directly to an
+             should do and which tools it needs. The prompt will be fed directly to an
              MCP code-generation AI, so be precise about tool names, parameters, return
-             values, and which public APIs to use (prefer free, key-less APIs where possible).
+             values, and which public APIs to use.
 
 Rules:
+-  ██ API KEY RULE — this is the most important rule after rule 1 ██ ALWAYS use free, public APIs that require NO API key unless the prompt explicitly says an API key is available or tells you to use a specific authenticated service.
 - Output ONLY valid JSON — no markdown fences, no commentary.
 - Produce between 2 and 6 servers; pick the most impactful ones for the goal.
 - Each server should have a single, coherent responsibility.
@@ -86,14 +92,6 @@ def plan_tools(goal: str) -> list[dict]:
     Ask Claude to decompose a high-level goal into [{slug, prompt}, …].
     Runs locally before any Modal work begins.
     """
-    # client = anthropic.Anthropic()
-    # message = client.messages.create(
-    #     model="claude-opus-4-6",
-    #     max_tokens=2048,
-    #     system=PLANNER_SYSTEM,
-    #     messages=[{"role": "user", "content": f"Goal: {goal}"}],
-    # )
-    # raw = message.content[0].text.strip()
     if LLM_PROVIDER == "anthropic":
         client = anthropic.Anthropic()
         message = client.messages.create(
@@ -128,21 +126,24 @@ def plan_tools(goal: str) -> list[dict]:
     secrets=secrets_list,
     timeout=300,
 )
-def build_one_mcp(prompt: str, template: str) -> str:
+def build_mcp_and_tests(prompt: str, template: str) -> tuple[str, str]:
     """
-    Runs on a Modal worker.  Generates one complete MCP server and returns its source.
+    Runs on a Modal worker. Generates one complete MCP server and its test script.
+    Returns (mcp_code, test_code).
     """
     import sys
     import os
     sys.path.insert(0, "/root")
     os.environ["LLM_PROVIDER"] = LLM_PROVIDER
-    from mcp_builder import generate  # noqa: PLC0415
-    return generate(prompt, template)
+    from mcp_builder import generate, generate_tests  # noqa: PLC0415
+    code = generate(prompt, template)
+    test_code = generate_tests(code)
+    return code, test_code
 
 
-# ── Syntax validation (runs locally) ──────────────────────────────────────────
+# ── Syntax validation ──────────────────────────────────────────────────────────
 
-MAX_RETRIES = 2
+MAX_RETRIES = 2  # syntax-error retry passes before the deploy loop
 
 def valid_syntax(code: str) -> bool:
     try:
@@ -186,25 +187,80 @@ def make_room_for(n: int) -> None:
     to_stop = deployed[:excess]
     print(f"\n  At the {ENDPOINT_LIMIT}-endpoint limit. "
           f"Stopping {len(to_stop)} oldest app(s) to make room:")
-    for app in to_stop:
-        name = app.get("Description", app.get("App ID", "?"))
-        app_id = app.get("App ID", "")
+    for a in to_stop:
+        name = a.get("Description", a.get("App ID", "?"))
+        app_id = a.get("App ID", "")
         print(f"    Stopping: {name} ({app_id})")
         subprocess.run(["modal", "app", "stop", app_id], check=False)
 
 
 # ── Deploy helper (runs locally) ───────────────────────────────────────────────
 
-def deploy_file(filepath: Path) -> bool:
+def deploy_file(filepath: Path) -> tuple[bool, str | None]:
+    """Deploy a file with `modal deploy`. Returns (success, endpoint_url)."""
     if not shutil.which("modal"):
         print(f"    [!] `modal` CLI not found — skipping deploy of {filepath.name}")
-        return False
+        return False, None
     print(f"    Deploying {filepath.name} …")
-    result = subprocess.run(["modal", "deploy", str(filepath)])
-    return result.returncode == 0
+    result = subprocess.run(
+        ["modal", "deploy", str(filepath)],
+        capture_output=True, text=True,
+    )
+    output = result.stdout + result.stderr
+    print(output)
+    url = None
+    if result.returncode == 0:
+        match = re.search(r"https://[a-z0-9-]+--[a-z0-9-]+-web\.modal\.run", output)
+        if match:
+            url = match.group(0)
+    return result.returncode == 0, url
+
+
+# ── App name helpers (runs locally) ────────────────────────────────────────────
+
+def extract_app_name(code: str) -> str | None:
+    """Extract the modal.App name from generated source code."""
+    match = re.search(r'modal\.App\(["\']([^"\']+)["\']', code)
+    return match.group(1) if match else None
+
+
+def stop_app_by_name(app_name: str) -> None:
+    """Look up a deployed app by name and stop it."""
+    for a in _deployed_apps():
+        if a.get("Description", "") == app_name:
+            app_id = a.get("App ID", "")
+            if app_id:
+                print(f"    Stopping app '{app_name}' ({app_id}) …")
+                subprocess.run(["modal", "app", "stop", app_id], check=False)
+                return
+    print(f"    [!] Could not find deployed app '{app_name}' to stop")
+
+
+# ── Test runner (runs locally) ─────────────────────────────────────────────────
+
+def run_tests_locally(endpoint_url: str, test_code: str) -> str:
+    """Write test_code to a temp file, run it with the endpoint URL, return output."""
+    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
+        f.write(test_code)
+        test_file = Path(f.name)
+    try:
+        result = subprocess.run(
+            [sys.executable, str(test_file), endpoint_url],
+            capture_output=True, text=True, timeout=60,
+        )
+        output = result.stdout
+        if result.stderr:
+            output += f"\nSTDERR:\n{result.stderr}"
+        return output
+    except subprocess.TimeoutExpired:
+        return "Tests timed out after 60 seconds."
+    finally:
+        test_file.unlink(missing_ok=True)
 
 
 # ── Entrypoint ─────────────────────────────────────────────────────────────────
+
+MAX_DEPLOY_ATTEMPTS = 2  # 1 retry per MCP (attempt 1 + attempt 2)
 
 @app.local_entrypoint()
 def main(goal: str = ""):
@@ -227,60 +283,124 @@ def main(goal: str = ""):
         print(f"   {i}. {t['slug']}")
         print(f"      {t['prompt'][:120]}{'…' if len(t['prompt']) > 120 else ''}")
 
-    # ── 3. Load template once; pass to all workers ─────────────────────────────
+    # ── 3. Load template once ──────────────────────────────────────────────────
     if not TEMPLATE_FILE.exists():
         print(f"Error: template not found at {TEMPLATE_FILE}", file=sys.stderr)
         sys.exit(1)
     template = TEMPLATE_FILE.read_text()
 
-    # ── 4. Generate in parallel on Modal (with syntax-error retry) ────────────
-    print(f"\n Generating {len(tools)} MCP server(s) in parallel on Modal …")
+    # ── 4. Generate code + tests in parallel on Modal ─────────────────────────
+    print(f"\n Generating {len(tools)} MCP server(s) + tests in parallel on Modal …")
     args = [(t["prompt"], template) for t in tools]
-    generated_codes = list(build_one_mcp.starmap(args))
+    raw_results = list(build_mcp_and_tests.starmap(args))
+    generated = list(raw_results)  # list of (code, test_code)
 
+    # ── 5. Batch syntax check + retry (fast pre-check before deploying) ────────
     for attempt in range(1, MAX_RETRIES + 1):
-        bad = [i for i, code in enumerate(generated_codes) if not valid_syntax(code)]
+        bad = [i for i, (code, _) in enumerate(generated) if not valid_syntax(code)]
         if not bad:
             break
-        print(f"\n  {len(bad)} server(s) had syntax errors — retrying (attempt {attempt}/{MAX_RETRIES}) …")
-        retry_results = list(build_one_mcp.starmap([args[i] for i in bad]))
-        for i, code in zip(bad, retry_results):
-            generated_codes[i] = code
+        print(f"\n  {len(bad)} server(s) had syntax errors — retrying "
+              f"(attempt {attempt}/{MAX_RETRIES}) …")
+        retry_results = list(build_mcp_and_tests.starmap([args[i] for i in bad]))
+        for i, result in zip(bad, retry_results):
+            generated[i] = result
 
-    # report any that still fail after all retries
-    still_bad = [i for i, code in enumerate(generated_codes) if not valid_syntax(code)]
-    if still_bad:
-        print(f"\n  WARNING: {len(still_bad)} server(s) still have syntax errors after retries:")
-        for i in still_bad:
-            print(f"    - {tools[i]['slug']}")
-
-    # ── 5. Save files ──────────────────────────────────────────────────────────
+    # ── 6. Per-MCP: deploy → test → interpret → retry ─────────────────────────
     OUTPUT_DIR.mkdir(exist_ok=True)
-    saved_files: list[Path] = []
+    make_room_for(len(tools))
 
-    print(f"\n Saving to {OUTPUT_DIR}/")
-    for i, (tool, code) in enumerate(zip(tools, generated_codes), 1):
-        filename = f"{i}_{tool['slug']}_mcp.py"
-        filepath = OUTPUT_DIR / filename
-        filepath.write_text(code)
-        saved_files.append(filepath)
-        lines = len(code.splitlines())
-        print(f"   Saved: {filename}  ({lines} lines)")
+    from mcp_builder import interpret_results  # runs locally
 
-    # ── 6. Deploy all (stop oldest apps if at endpoint limit) ─────────────────
-    make_room_for(len(saved_files))
-    print(f"\n Deploying all servers …")
-    results: list[tuple[str, bool]] = []
-    for filepath in saved_files:
-        ok = deploy_file(filepath)
-        results.append((filepath.name, ok))
+    summary: list[tuple[str, str]] = []
+
+    for idx, (tool, (code, test_code)) in enumerate(zip(tools, generated), 1):
+        slug      = tool["slug"]
+        prompt    = tool["prompt"]
+        filename  = f"{idx}_{slug}_mcp.py"
+        filepath  = OUTPUT_DIR / filename
+
+        print(f"\n {'─' * 52}")
+        print(f"  [{idx}/{len(tools)}] {slug}")
+        print(f" {'─' * 52}")
+
+        current_code   = code
+        current_tests  = test_code
+        current_prompt = prompt
+        final_status   = None
+
+        for attempt in range(1, MAX_DEPLOY_ATTEMPTS + 1):
+            print(f"\n   Attempt {attempt}/{MAX_DEPLOY_ATTEMPTS}")
+
+            # Syntax guard on retried code
+            if not valid_syntax(current_code):
+                print(f"   Syntax error — cannot deploy.")
+                if attempt < MAX_DEPLOY_ATTEMPTS:
+                    print(f"   Regenerating …")
+                    current_code, current_tests = build_mcp_and_tests.remote(
+                        current_prompt, template
+                    )
+                    continue
+                final_status = "skipped (failed after retries)"
+                break
+
+            filepath.write_text(current_code)
+            ok, endpoint_url = deploy_file(filepath)
+
+            if not ok or not endpoint_url:
+                print(f"   Deploy failed.")
+                if attempt < MAX_DEPLOY_ATTEMPTS:
+                    continue
+                final_status = "skipped (failed after retries)"
+                break
+
+            print(f"   Endpoint: {endpoint_url}")
+            print(f"   Running tests …")
+            test_output = run_tests_locally(endpoint_url, current_tests)
+            preview = test_output[:600] + ("…" if len(test_output) > 600 else "")
+            print(f"   Test output:\n{preview}")
+
+            print(f"   Interpreting results …")
+            interpretation = interpret_results(test_output, current_code, current_prompt)
+            verdict  = interpretation.get("verdict", "code_bug")
+            reason   = interpretation.get("reason", "")
+            print(f"   Verdict: {verdict} — {reason}")
+
+            if verdict == "valid":
+                final_status = "deployed"
+                break
+
+            # Not valid — tear down the app before deciding what to do
+            app_name = extract_app_name(current_code)
+            if app_name:
+                stop_app_by_name(app_name)
+            filepath.unlink(missing_ok=True)
+
+            if verdict == "transient":
+                final_status = "skipped (external failure)"
+                break
+
+            # code_bug
+            if attempt < MAX_DEPLOY_ATTEMPTS:
+                adjusted = interpretation.get("adjusted_prompt") or current_prompt
+                print(f"   Regenerating with adjusted prompt …")
+                current_code, current_tests = build_mcp_and_tests.remote(
+                    adjusted, template
+                )
+                current_prompt = adjusted
+            else:
+                final_status = "skipped (failed after retries)"
+
+        if final_status is None:
+            final_status = "skipped (failed after retries)"
+
+        summary.append((slug, final_status))
 
     # ── 7. Summary ─────────────────────────────────────────────────────────────
     print("\n" + "━" * 56)
     print("  Summary")
     print("━" * 56)
-    for name, ok in results:
-        status = "deployed" if ok else "FAILED  "
+    for name, status in summary:
         print(f"  [{status}] {name}")
     print("━" * 56)
     print(f"\n  Generated files: {OUTPUT_DIR}/")
