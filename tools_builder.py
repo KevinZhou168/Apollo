@@ -30,6 +30,9 @@ from pathlib import Path
 
 import anthropic
 import modal
+import dotenv
+
+dotenv.load_dotenv()
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -41,7 +44,7 @@ OUTPUT_DIR   = HERE / "generated_mcps"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("anthropic>=0.40.0")
+    .pip_install("anthropic>=0.40.0", "python-dotenv")
     .add_local_file(HERE / "mcp_builder.py", remote_path="/root/mcp_builder.py")
 )
 
