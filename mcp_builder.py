@@ -12,14 +12,20 @@ Quick start:
     print(code)
 """
 
+import os
 import re
 from pathlib import Path
+import dotenv
+
+dotenv.load_dotenv()
+
 import anthropic
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 TEMPLATE_FILE = Path(__file__).parent / "mcp_template.py"
-MODEL         = "claude-opus-4-6"
+MODEL         = "claude-opus-4-6" if LLM_PROVIDER == "anthropic" else "gpt-5.2"
 MAX_TOKENS    = 8096
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -108,23 +114,42 @@ def generate(prompt: str, template: str | None = None) -> str:
     if template is None:
         template = load_template()
 
-    client = anthropic.Anthropic()
     system = SYSTEM_PROMPT.format(template=template)
 
-    message = client.messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=system,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Build an MCP server for the following use case:\n\n"
-                    f"{prompt}\n\n"
-                    "Remember: output raw Python only, no markdown fences."
-                ),
-            }
-        ],
-    )
-
-    return strip_fences(message.content[0].text)
+    if LLM_PROVIDER == "anthropic":
+        client = anthropic.Anthropic()
+        message = client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=system,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Build an MCP server for the following use case:\n\n"
+                        f"{prompt}\n\n"
+                        "Remember: output raw Python only, no markdown fences."
+                    ),
+                }
+            ],
+        )
+        return strip_fences(message.content[0].text)
+    else:  # openai
+        import openai
+        client = openai.OpenAI()
+        message = client.chat.completions.create(
+            model=MODEL,
+            max_completion_tokens=MAX_TOKENS,
+            messages=[
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": (
+                        "Build an MCP server for the following use case:\n\n"
+                        f"{prompt}\n\n"
+                        "Remember: output raw Python only, no markdown fences."
+                    ),
+                }
+            ],
+        )
+        return strip_fences(message.choices[0].message.content)

@@ -31,8 +31,17 @@ from pathlib import Path
 import anthropic
 import modal
 import dotenv
+import os
 
 dotenv.load_dotenv()
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER","openai").lower()
+if LLM_PROVIDER not in ("anthropic", "openai"):
+    print(f"Error: LLM_PROVIDER must be 'anthropic' or 'openai', got '{LLM_PROVIDER}'", file=sys.stderr)
+    sys.exit(1)
+print(f"Using LLM Provider: {LLM_PROVIDER}")
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -42,9 +51,13 @@ OUTPUT_DIR   = HERE / "generated_mcps"
 
 # ── Modal image & app ──────────────────────────────────────────────────────────
 
+secrets_list = [modal.Secret.from_name("anthropic-secret")]
+if LLM_PROVIDER == "openai":
+    secrets_list = [modal.Secret.from_name("openai-secret")]
+
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("anthropic>=0.40.0", "python-dotenv")
+    .pip_install("anthropic>=0.40.0", "openai>=1.0.0", "python-dotenv")
     .add_local_file(HERE / "mcp_builder.py", remote_path="/root/mcp_builder.py")
 )
 
@@ -73,14 +86,35 @@ def plan_tools(goal: str) -> list[dict]:
     Ask Claude to decompose a high-level goal into [{slug, prompt}, …].
     Runs locally before any Modal work begins.
     """
-    client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=2048,
-        system=PLANNER_SYSTEM,
-        messages=[{"role": "user", "content": f"Goal: {goal}"}],
-    )
-    raw = message.content[0].text.strip()
+    # client = anthropic.Anthropic()
+    # message = client.messages.create(
+    #     model="claude-opus-4-6",
+    #     max_tokens=2048,
+    #     system=PLANNER_SYSTEM,
+    #     messages=[{"role": "user", "content": f"Goal: {goal}"}],
+    # )
+    # raw = message.content[0].text.strip()
+    if LLM_PROVIDER == "anthropic":
+        client = anthropic.Anthropic()
+        message = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=2048,
+            system=PLANNER_SYSTEM,
+            messages=[{"role": "user", "content": f"Goal: {goal}"}],
+        )
+        raw = message.content[0].text.strip()
+    else:  # openai
+        import openai
+        client = openai.OpenAI()
+        message = client.chat.completions.create(
+            model="gpt-4-turbo",
+            max_tokens=2048,
+            messages=[
+                {"role": "system", "content": PLANNER_SYSTEM},
+                {"role": "user", "content": f"Goal: {goal}"},
+            ],
+        )
+        raw = message.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```[^\n]*\n", "", raw)
         raw = re.sub(r"\n```\s*$", "", raw)
@@ -91,7 +125,7 @@ def plan_tools(goal: str) -> list[dict]:
 
 @app.function(
     image=image,
-    secrets=[modal.Secret.from_name("anthropic-secret")],
+    secrets=secrets_list,
     timeout=300,
 )
 def build_one_mcp(prompt: str, template: str) -> str:
@@ -99,7 +133,9 @@ def build_one_mcp(prompt: str, template: str) -> str:
     Runs on a Modal worker.  Generates one complete MCP server and returns its source.
     """
     import sys
+    import os
     sys.path.insert(0, "/root")
+    os.environ["LLM_PROVIDER"] = LLM_PROVIDER
     from mcp_builder import generate  # noqa: PLC0415
     return generate(prompt, template)
 
