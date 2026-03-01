@@ -40,6 +40,15 @@ import os
 
 dotenv.load_dotenv()
 
+# ── Live visualization (optional) ─────────────────────────────────────────────
+try:
+    from viz_server import start_viz_server, emit as viz_emit
+    HAS_VIZ = True
+except ImportError:
+    HAS_VIZ = False
+    def viz_emit(event_type: str, data: dict) -> None: pass      # noqa: E704
+    def start_viz_server(port: int = 8765, open_browser: bool = True) -> None: pass  # noqa: E704
+
 # ── Terminal styling ───────────────────────────────────────────────────────────
 _R   = "\033[0m"   # reset
 _B   = "\033[1m"   # bold
@@ -337,10 +346,17 @@ MAX_DEPLOY_ATTEMPTS = 2  # 1 retry per MCP (attempt 1 + attempt 2)
 
 @app.local_entrypoint()
 def main(goal: str = ""):
+    # ── Viz node layout constants ───────────────────────────────────────────────
+    _VIZ_PLANET_TYPES = ['mars', 'earth', 'venus', 'neptune', 'mercury', 'uranus']
+    _VIZ_AGENT_COLORS = ['#c1440e', '#4488cc', '#d4a84b', '#4466aa', '#8a8a8a', '#88ccdd']
+    _VIZ_SRV_PLANETS  = ['uranus', 'neptune', 'earth', 'jupiter', 'mars', 'saturn']
+    _VIZ_SRV_COLORS   = ['#88ccdd', '#4361ee', '#4488cc', '#C88B3A', '#c1440e', '#7b2cbf']
+
     # ── 1. Get goal ────────────────────────────────────────────────────────────
     print(f"\n{_C}{_B}╔══════════════════════════════════════════════════╗{_R}")
     print(f"{_C}{_B}║  ⚡  ATLAS  ·  MCP Server Factory                ║{_R}")
     print(f"{_C}{_B}╚══════════════════════════════════════════════════╝{_R}")
+    start_viz_server(port=8765)
     if not goal:
         print(f"\n{_B}  Describe your goal{_R} {_DIM}(e.g. 'plan a trip to spain'){_R}")
         goal = input(f"{_C}  › {_R}").strip()
@@ -349,16 +365,53 @@ def main(goal: str = ""):
         sys.exit(1)
 
     print(f"\n  {_B}goal{_R}  {goal}")
+    viz_emit("phase", {"text": f"Goal: {goal}"})
+    viz_emit("node", {
+        "id": "prompt", "label": goal, "bt": "sun",
+        "color": "#FDB813", "r": 32, "ix": 0, "iy": -240,
+        "desc": "User prompt — the high-level goal",
+        "info": goal,
+    })
+    viz_emit("phase", {"text": "Planning MCP servers…"})
 
     # ── 2. Plan tools ──────────────────────────────────────────────────────────
     print(_sec("PLANNING"))
     print(f"  decomposing goal into MCP servers…")
     tools = plan_tools(goal)
+    N = len(tools)
 
     print(f"\n  {_B}{len(tools)} server(s){_R} to build:")
     for i, t in enumerate(tools, 1):
         print(f"  {_C}  {i}{_R}  {_B}{t['slug']}{_R}")
         print(f"  {_DIM}     {t['prompt'][:120]}{'…' if len(t['prompt']) > 120 else ''}{_R}")
+
+    # Emit supervisor, builder, and agent nodes
+    viz_emit("node", {
+        "id": "supervisor", "label": "Supervisor", "bt": "planet", "pt": "saturn",
+        "color": "#f0a500", "r": 26, "ix": 0, "iy": -160,
+        "desc": "Orchestrates the pipeline and decomposes the goal",
+        "info": "Calls plan_tools() to decompose the goal into MCP server specs.",
+    })
+    viz_emit("edge", {"source": "prompt", "target": "supervisor", "color": "#d4a53c", "width": 3})
+    viz_emit("node", {
+        "id": "builder", "label": "Tool Builder", "bt": "planet", "pt": "jupiter",
+        "color": "#4A9EFF", "r": 24, "ix": 0, "iy": -80,
+        "desc": "Generates MCP server code in parallel on Modal Cloud",
+        "info": "Dispatches parallel code generation tasks to Modal Cloud workers.",
+    })
+    viz_emit("edge", {"source": "supervisor", "target": "builder", "color": "#d4a53c", "width": 2.5})
+    for i, t in enumerate(tools):
+        slug = t["slug"]
+        ix   = (i - N / 2 + 0.5) * 160
+        viz_emit("node", {
+            "id": f"agent_{slug}", "label": f"MCP Builder {i + 1}", "bt": "planet",
+            "pt": _VIZ_PLANET_TYPES[i % len(_VIZ_PLANET_TYPES)],
+            "color": _VIZ_AGENT_COLORS[i % len(_VIZ_AGENT_COLORS)],
+            "r": 15, "ix": ix, "iy": 20,
+            "desc": f"Builds {slug} server",
+            "info": t["prompt"][:200],
+        })
+        viz_emit("edge", {"source": "builder", "target": f"agent_{slug}", "color": "#d4a53c", "width": 1.8})
 
     # ── 3. Load template once ──────────────────────────────────────────────────
     if not TEMPLATE_FILE.exists():
@@ -387,11 +440,30 @@ def main(goal: str = ""):
     # ── 4. Generate code + tests in parallel on Modal ─────────────────────────
     print(_sec("GENERATING"))
     print(f"  spinning up {_B}{len(tools)}{_R} Modal workers  {_DIM}(code + tests in parallel)…{_R}")
+    viz_emit("phase", {"text": "Generating code on Modal…"})
+    for t in tools:
+        viz_emit("status", {"id": f"agent_{t['slug']}", "status": "building"})
     args = [(t["prompt"], template, ctx) for t, ctx in zip(tools, api_contexts)]
     generated = list(build_mcp_and_tests.starmap(args))  # list of (code, test_code)
 
+    # Emit server nodes now that we have generated code
+    for i, (t, _) in enumerate(zip(tools, generated)):
+        slug = t["slug"]
+        ix   = (i - N / 2 + 0.5) * 160
+        viz_emit("node", {
+            "id": f"srv_{slug}", "label": f"{slug}_mcp", "bt": "planet",
+            "pt": _VIZ_SRV_PLANETS[i % len(_VIZ_SRV_PLANETS)],
+            "color": _VIZ_SRV_COLORS[i % len(_VIZ_SRV_COLORS)],
+            "r": 17, "ix": ix, "iy": 120,
+            "desc": f"{slug} MCP server",
+            "info": f"Generated MCP server for {slug}.",
+        })
+        viz_emit("edge", {"source": f"agent_{slug}", "target": f"srv_{slug}", "color": "#7b2cbf", "width": 1.5})
+        viz_emit("status", {"id": f"agent_{slug}", "status": "deployed"})
+
     # ── 5. Batch syntax check + retry (fast pre-check before deploying) ────────
     print(_sec("SYNTAX CHECK"))
+    viz_emit("phase", {"text": "Checking syntax…"})
     for attempt in range(1, MAX_RETRIES + 1):
         bad = [i for i, (code, _) in enumerate(generated) if not valid_syntax(code)]
         if not bad:
@@ -407,7 +479,18 @@ def main(goal: str = ""):
     if still_bad:
         print(f"  {_RE}  ✗  {len(still_bad)} server(s) still failing after retries:{_R}")
         for i in still_bad:
-            print(f"  {_DIM}    · {tools[i]['slug']}{_R}")
+            slug = tools[i]['slug']
+            ix   = (i - N / 2 + 0.5) * 160
+            print(f"  {_DIM}    · {slug}{_R}")
+            viz_emit("node", {
+                "id": f"v_{slug}_syntax", "label": "Syntax Error", "bt": "comet",
+                "color": "#00E5FF", "r": 13, "ix": ix, "iy": 220,
+                "desc": "ast.parse() — syntax validation failed",
+                "info": f"Syntax error in {slug} after {MAX_RETRIES} retries.",
+            })
+            viz_emit("edge", {"source": f"srv_{slug}", "target": f"v_{slug}_syntax", "color": "#00E5FF", "width": 0.8})
+            viz_emit("status", {"id": f"v_{slug}_syntax", "status": "failed"})
+            viz_emit("status", {"id": f"srv_{slug}", "status": "failed"})
     else:
         print(f"  {_G}  ✓  all {len(generated)} servers passed{_R}")
 
@@ -427,10 +510,23 @@ def main(goal: str = ""):
 
         print(_mcp_header(idx, len(tools), slug))
 
+        i          = idx - 1
+        agent_ix   = (i - N / 2 + 0.5) * 160
+
         current_code   = code
         current_tests  = test_code
         current_prompt = prompt
         final_status   = None
+
+        viz_emit("phase", {"text": f"Deploying {slug}…"})
+        # Create deploy validation node upfront (JS skips duplicates)
+        viz_emit("node", {
+            "id": f"v_{slug}_deploy", "label": "Deploy", "bt": "comet",
+            "color": "#00E5FF", "r": 13, "ix": agent_ix - 20, "iy": 220,
+            "desc": f"modal deploy — {slug}",
+            "info": f"Deploying {slug} MCP server to Modal.",
+        })
+        viz_emit("edge", {"source": f"srv_{slug}", "target": f"v_{slug}_deploy", "color": "#00E5FF", "width": 0.8})
 
         for attempt in range(1, MAX_DEPLOY_ATTEMPTS + 1):
             print(f"\n  {_DIM}  ↳ attempt {attempt}/{MAX_DEPLOY_ATTEMPTS}{_R}")
@@ -444,6 +540,7 @@ def main(goal: str = ""):
                         current_prompt, template
                     )
                     continue
+                viz_emit("status", {"id": f"v_{slug}_deploy", "status": "failed"})
                 final_status = "skipped (failed after retries)"
                 break
 
@@ -452,6 +549,7 @@ def main(goal: str = ""):
 
             if not ok or not endpoint_url:
                 print(f"  {_RE}    ✗  deploy failed{_R}")
+                viz_emit("status", {"id": f"v_{slug}_deploy", "status": "failed"})
                 if attempt < MAX_DEPLOY_ATTEMPTS:
                     continue
                 final_status = "skipped (failed after retries)"
@@ -459,6 +557,17 @@ def main(goal: str = ""):
 
             print(f"  {_BL}    ⬡  endpoint  {endpoint_url}{_R}")
             print(f"  {_DIM}    running tests…{_R}")
+
+            viz_emit("phase", {"text": f"Testing {slug}…"})
+            # Create test validation node (JS skips duplicates)
+            viz_emit("node", {
+                "id": f"v_{slug}_test", "label": "Tests", "bt": "comet",
+                "color": "#00E5FF", "r": 13, "ix": agent_ix + 20, "iy": 220,
+                "desc": f"Integration tests — {slug}",
+                "info": f"Running integration tests for {slug} MCP server.",
+            })
+            viz_emit("edge", {"source": f"srv_{slug}", "target": f"v_{slug}_test", "color": "#00E5FF", "width": 0.8})
+
             test_output = run_tests_locally(endpoint_url, current_tests)
             preview = test_output[:600] + ("…" if len(test_output) > 600 else "")
             print(f"{_DIM}{preview}{_R}")
@@ -470,12 +579,19 @@ def main(goal: str = ""):
 
             if verdict == "valid":
                 print(f"  {_G}    ✓  valid{_R}  {_DIM}─  {reason}{_R}")
+                viz_emit("status", {"id": f"v_{slug}_deploy", "status": "deployed"})
+                viz_emit("status", {"id": f"v_{slug}_test",   "status": "deployed"})
+                viz_emit("status", {"id": f"srv_{slug}",      "status": "deployed"})
                 final_status = "deployed"
                 break
             elif verdict == "transient":
                 print(f"  {_Y}    ⚠  transient{_R}  {_DIM}─  {reason}{_R}")
+                viz_emit("status", {"id": f"v_{slug}_test", "status": "failed"})
+                viz_emit("status", {"id": f"srv_{slug}",    "status": "skipped"})
             else:
                 print(f"  {_RE}    ✗  code_bug{_R}  {_DIM}─  {reason}{_R}")
+                viz_emit("status", {"id": f"v_{slug}_deploy", "status": "failed"})
+                viz_emit("status", {"id": f"v_{slug}_test",   "status": "failed"})
 
             # Not valid — tear down the app before deciding what to do
             app_name = extract_app_name(current_code)
@@ -496,9 +612,11 @@ def main(goal: str = ""):
                 )
                 current_prompt = adjusted
             else:
+                viz_emit("status", {"id": f"srv_{slug}", "status": "failed"})
                 final_status = "skipped (failed after retries)"
 
         if final_status is None:
+            viz_emit("status", {"id": f"srv_{slug}", "status": "failed"})
             final_status = "skipped (failed after retries)"
 
         summary.append((slug, final_status))
@@ -522,3 +640,6 @@ def main(goal: str = ""):
         print(f"  {col}{_B}{icon}{_R}  {_B}{name}{_R}  {_DIM}{label}{_R}")
     print(f"{_C}{_B}{'━' * 54}{_R}")
     print(f"\n  {_DIM}files saved to  {OUTPUT_DIR}/{_R}")
+
+    viz_emit("phase", {"text": "Pipeline complete ✓"})
+    viz_emit("done", {})

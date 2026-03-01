@@ -327,140 +327,9 @@
       }));
     }
 
-    // ── Graph Data — Top-down flow ───────────────────────────────────────────────
-    // iy values control vertical position (top-down tree)
-    const nodeDefs = [
-      {
-        id: 'prompt', label: 'Plan me a trip to Spain', color: '#FDB813', r: 32, ix: 0, iy: -240, bt: 'sun',
-        desc: 'User prompt — the high-level goal',
-        info: 'The entry point of the Atlas pipeline. A natural-language goal is provided by the user or an upstream agent. The Supervisor decomposes this into actionable MCP server specifications.'
-      },
-      {
-        id: 'supervisor', label: 'Supervisor', color: '#C4A44A', r: 26, ix: 0, iy: -150, bt: 'planet', pt: 'saturn',
-        desc: 'Orchestrates the pipeline and decomposes the goal',
-        info: 'Calls plan_tools() to use an LLM to break the high-level goal into individual MCP server specs. Each spec includes a description, required API capabilities, and endpoint definitions. Runs locally before any cloud execution.'
-      },
-      {
-        id: 'builder', label: 'Tool Builder', color: '#C88B3A', r: 24, ix: 0, iy: -60, bt: 'planet', pt: 'jupiter',
-        desc: 'Generates MCP server code in parallel on Modal Cloud',
-        info: 'The main tools_builder.py orchestrator. Loads the MCP template, looks up curated APIs from the public-apis dataset, then dispatches parallel code generation tasks to Modal Cloud workers. Manages the full lifecycle from spec → code → validation → deployment.'
-      },
-      {
-        id: 'agent1', label: 'MCP Builder 1', color: '#c1440e', r: 15, ix: -160, iy: 25, bt: 'planet', pt: 'mars',
-        desc: 'Builds weather server', info: 'A Modal Cloud worker running build_one_mcp(). Takes the weather server spec + API context and calls mcp_builder.generate() to produce a complete MCP server with get_forecast() and get_alerts() endpoints.'
-      },
-      {
-        id: 'agent2', label: 'MCP Builder 2', color: '#4488cc', r: 15, ix: -80, iy: 25, bt: 'planet', pt: 'earth',
-        desc: 'Builds flights server', info: 'Generates the flights MCP server with search_flights() and get_prices() endpoints. Uses public flight APIs for real data access.'
-      },
-      {
-        id: 'agent3', label: 'MCP Builder 3', color: '#d4a84b', r: 15, ix: 0, iy: 25, bt: 'planet', pt: 'venus',
-        desc: 'Builds hotels server', info: 'Generates the hotels MCP server with find_hotels() and get_reviews() endpoints. Integrates hotel booking APIs.'
-      },
-      {
-        id: 'agent4', label: 'MCP Builder 4', color: '#4466aa', r: 15, ix: 80, iy: 25, bt: 'planet', pt: 'neptune',
-        desc: 'Builds translate server', info: 'Generates the translation MCP server with translate_text() and detect_lang() endpoints. Uses translation APIs.'
-      },
-      {
-        id: 'agent5', label: 'MCP Builder 5', color: '#8a8a8a', r: 15, ix: 160, iy: 25, bt: 'planet', pt: 'mercury',
-        desc: 'Builds currency server', info: 'Generates the currency MCP server with convert() and get_rates() endpoints. Uses exchange rate APIs.'
-      },
-      {
-        id: 'srv_weather', label: 'weather_mcp', color: '#88ccdd', r: 17, ix: -160, iy: 110, bt: 'planet', pt: 'uranus',
-        desc: 'Weather forecast MCP server', info: 'A generated MCP server deployed on Modal. Exposes weather forecasting tools via the Model Context Protocol, accessible by any MCP-compatible AI agent.'
-      },
-      {
-        id: 'srv_flights', label: 'flights_mcp', color: '#4361ee', r: 17, ix: -80, iy: 110, bt: 'planet', pt: 'neptune',
-        desc: 'Flight search MCP server', info: 'Deployed MCP server for flight search. Agents can call search_flights() and get_prices() to find and compare flights.'
-      },
-      {
-        id: 'srv_hotels', label: 'hotels_mcp', color: '#4488cc', r: 17, ix: 0, iy: 110, bt: 'planet', pt: 'earth',
-        desc: 'Hotel booking MCP server', info: 'Deployed MCP server for hotel lookups. Provides find_hotels() for availability and get_reviews() for ratings.'
-      },
-      {
-        id: 'srv_translate', label: 'translate_mcp', color: '#C88B3A', r: 17, ix: 80, iy: 110, bt: 'planet', pt: 'jupiter',
-        desc: 'Translation MCP server', info: 'Deployed MCP server for language translation. Supports translate_text() between languages and detect_lang() for identification.'
-      },
-      {
-        id: 'srv_currency', label: 'currency_mcp', color: '#c1440e', r: 17, ix: 160, iy: 110, bt: 'planet', pt: 'mars',
-        desc: 'Currency conversion MCP server', info: 'Deployed MCP server for currency operations. Provides convert() for conversion and get_rates() for live exchange rates.'
-      },
-      {
-        id: 't_weather', label: 'get_forecast()', color: P.tool, r: 10, ix: -175, iy: 190, bt: 'moon',
-        desc: 'Returns weather forecast for a city', info: 'Endpoint that accepts a city name and date range, returns temperature, conditions, and precipitation forecasts from a public weather API.'
-      },
-      {
-        id: 't_alerts', label: 'get_alerts()', color: P.tool, r: 9, ix: -145, iy: 200, bt: 'moon',
-        desc: 'Returns severe weather alerts', info: 'Returns active severe weather alerts (storms, heat waves, etc.) for a specified region.'
-      },
-      {
-        id: 't_flights', label: 'search_flights()', color: P.tool, r: 10, ix: -95, iy: 190, bt: 'moon',
-        desc: 'Searches flights between airports', info: 'Accepts origin, destination, and dates. Returns available flights with prices, airlines, and durations.'
-      },
-      {
-        id: 't_prices', label: 'get_prices()', color: P.tool, r: 9, ix: -65, iy: 200, bt: 'moon',
-        desc: 'Gets price trends for a route', info: 'Returns historical and predicted price trends for a flight route to help find the best booking time.'
-      },
-      {
-        id: 't_hotels', label: 'find_hotels()', color: P.tool, r: 10, ix: -15, iy: 190, bt: 'moon',
-        desc: 'Finds available hotels in a city', info: 'Searches for available hotels by city, dates, and preferences. Returns names, prices, and availability.'
-      },
-      {
-        id: 't_reviews', label: 'get_reviews()', color: P.tool, r: 9, ix: 15, iy: 200, bt: 'moon',
-        desc: 'Gets hotel reviews and ratings', info: 'Returns aggregated reviews and star ratings for a specified hotel.'
-      },
-      {
-        id: 't_translate', label: 'translate_text()', color: P.tool, r: 10, ix: 65, iy: 190, bt: 'moon',
-        desc: 'Translates text between languages', info: 'Translates input text from one language to another using a public translation API.'
-      },
-      {
-        id: 't_detect', label: 'detect_lang()', color: P.tool, r: 9, ix: 95, iy: 200, bt: 'moon',
-        desc: 'Detects language of input text', info: 'Identifies the language of input text, returning the language code and confidence level.'
-      },
-      {
-        id: 't_convert', label: 'convert()', color: P.tool, r: 10, ix: 145, iy: 190, bt: 'moon',
-        desc: 'Converts between currencies', info: 'Converts an amount from one currency to another using live exchange rates.'
-      },
-      {
-        id: 't_rates', label: 'get_rates()', color: P.tool, r: 9, ix: 175, iy: 200, bt: 'moon',
-        desc: 'Gets current exchange rates', info: 'Returns current exchange rates for a base currency against all supported currencies.'
-      },
-      {
-        id: 'v_syntax', label: 'Syntax Check', color: '#44ddff', r: 13, ix: -120, iy: 270, bt: 'comet',
-        desc: 'ast.parse() — validates Python syntax', info: 'Runs Python\'s ast.parse() on the generated code to catch syntax errors before deployment. Any file that fails is regenerated with error context.'
-      },
-      {
-        id: 'v_conf', label: 'Confidence Score', color: '#66eeff', r: 13, ix: -40, iy: 270, bt: 'comet',
-        desc: 'Heuristic scoring: 0.0–1.0', info: 'assess_confidence() scores the code 0.0–1.0 based on: syntax validity, API call presence, suspicious URLs, and hardcoded data. Below 0.7 triggers fallback re-generation with scraped API docs.'
-      },
-      {
-        id: 'v_tests', label: 'Validation Tests', color: '#88ffee', r: 13, ix: 40, iy: 270, bt: 'comet',
-        desc: 'Endpoint & integration tests', info: 'Automated tests that verify each MCP endpoint responds correctly, returns valid data shapes, and handles error cases gracefully.'
-      },
-      {
-        id: 'v_deploy', label: 'Deploy Check', color: '#44ddaa', r: 13, ix: 120, iy: 270, bt: 'comet',
-        desc: 'modal deploy — live deployment verification', info: 'Runs modal deploy on each generated server file. Verifies the server starts successfully on Modal Cloud and is accessible via its MCP endpoint URL.'
-      },
-    ];
-
-    const edgeDefs = [
-      ['prompt', 'supervisor', P.gold, 3],
-      ['supervisor', 'builder', P.gold, 2.5],
-      ['builder', 'agent1', P.gold, 1.8], ['builder', 'agent2', P.gold, 1.8],
-      ['builder', 'agent3', P.gold, 1.8], ['builder', 'agent4', P.gold, 1.8], ['builder', 'agent5', P.gold, 1.8],
-      ['agent1', 'srv_weather', P.agent, 1.5], ['agent2', 'srv_flights', P.agent, 1.5],
-      ['agent3', 'srv_hotels', P.agent, 1.5], ['agent4', 'srv_translate', P.agent, 1.5], ['agent5', 'srv_currency', P.agent, 1.5],
-      ['srv_weather', 't_weather', P.tool, 1], ['srv_weather', 't_alerts', P.tool, 1],
-      ['srv_flights', 't_flights', P.tool, 1], ['srv_flights', 't_prices', P.tool, 1],
-      ['srv_hotels', 't_hotels', P.tool, 1], ['srv_hotels', 't_reviews', P.tool, 1],
-      ['srv_translate', 't_translate', P.tool, 1], ['srv_translate', 't_detect', P.tool, 1],
-      ['srv_currency', 't_convert', P.tool, 1], ['srv_currency', 't_rates', P.tool, 1],
-      ['srv_weather', 'v_syntax', P.valid, 0.8], ['srv_flights', 'v_syntax', P.valid, 0.8],
-      ['srv_hotels', 'v_conf', P.valid, 0.8], ['srv_weather', 'v_conf', P.valid, 0.8],
-      ['srv_currency', 'v_tests', P.valid, 0.8], ['srv_translate', 'v_tests', P.valid, 0.8],
-      ['srv_flights', 'v_tests', P.valid, 0.8], ['srv_hotels', 'v_deploy', P.valid, 0.8],
-      ['srv_currency', 'v_deploy', P.valid, 0.8], ['srv_translate', 'v_deploy', P.valid, 0.8],
-    ];
+    // ── Graph Data — populated live via SSE from viz_server.py ──────────────────
+    const nodeDefs = [];
+    const edgeDefs = [];
 
     // ── Runtime ──────────────────────────────────────────────────────────────────
     let nodes = [], edges = [], nodeMap = {};
@@ -516,41 +385,60 @@
       });
     }
 
-    // ── Timeline ─────────────────────────────────────────────────────────────────
-    const GOAL_TEXT = 'Plan me a trip to Spain';
-    const timeline = [
-      { t: 0, phase: 'Receiving prompt...' },
-      { t: 500, phase: 'Prompt received', spawn: ['prompt'] },
-      { t: 1200, phase: 'Supervisor analyzing goal...', spawn: ['supervisor'], link: [['prompt', 'supervisor']] },
-      { t: 1900, phase: 'Tool Builder generating...', spawn: ['builder'], link: [['supervisor', 'builder']] },
-      {
-        t: 2600, phase: 'Spawning MCP Agents...', spawn: ['agent1', 'agent2', 'agent3', 'agent4', 'agent5'],
-        link: [['builder', 'agent1'], ['builder', 'agent2'], ['builder', 'agent3'], ['builder', 'agent4'], ['builder', 'agent5']]
-      },
-      {
-        t: 3500, phase: 'Agents building MCP Servers...', spawn: ['srv_weather', 'srv_flights', 'srv_hotels', 'srv_translate', 'srv_currency'],
-        link: [['agent1', 'srv_weather'], ['agent2', 'srv_flights'], ['agent3', 'srv_hotels'], ['agent4', 'srv_translate'], ['agent5', 'srv_currency']]
-      },
-      {
-        t: 4500, phase: 'Exposing tools...', spawn: ['t_weather', 't_alerts', 't_flights', 't_prices', 't_hotels', 't_reviews', 't_translate', 't_detect', 't_convert', 't_rates'],
-        link: [['srv_weather', 't_weather'], ['srv_weather', 't_alerts'], ['srv_flights', 't_flights'], ['srv_flights', 't_prices'],
-        ['srv_hotels', 't_hotels'], ['srv_hotels', 't_reviews'], ['srv_translate', 't_translate'], ['srv_translate', 't_detect'],
-        ['srv_currency', 't_convert'], ['srv_currency', 't_rates']]
-      },
-      {
-        t: 5500, phase: 'Running validation tests...', spawn: ['v_syntax', 'v_conf', 'v_tests', 'v_deploy'],
-        link: [['srv_weather', 'v_syntax'], ['srv_flights', 'v_syntax'], ['srv_hotels', 'v_conf'], ['srv_weather', 'v_conf'],
-        ['srv_currency', 'v_tests'], ['srv_translate', 'v_tests'], ['srv_flights', 'v_tests'],
-        ['srv_hotels', 'v_deploy'], ['srv_currency', 'v_deploy'], ['srv_translate', 'v_deploy']]
-      },
-      { t: 6500, phase: 'Pipeline complete ✓' },
-    ];
+    // ── Live SSE state ────────────────────────────────────────────────────────────
+    let GOAL_TEXT = '';   // filled from first 'node' event with id==='prompt'
 
-    let animStart = 0, lastTime = 0, timelineIdx = 0;
+    let animStart = 0, lastTime = 0;
     let introShown = true, typedLen = 0;
 
     function showNode(id, now) { const n = nodeMap[id]; if (!n || n.visible) return; n.visible = true; n.spawnTime = now; bursts.push(makeBurst(n.x, n.y, n.color)) }
     function showEdge(sId, tId, now) { const e = edges.find(e => e.source.id === sId && e.target.id === tId); if (!e || e.visible) return; e.visible = true; e.spawnTime = now }
+
+    // ── Dynamic node/edge creation (called from SSE handlers) ────────────────────
+    function addLiveNode(d, now) {
+      if (nodeMap[d.id]) return;   // already exists — skip duplicate
+      const cx = W / 2, cy = H / 2;
+      const scale = Math.min(W, H) / 900;
+      const pp = Math.random() * TAU;
+      const n = {
+        ...d,
+        x: cx + (d.ix || 0) * scale + (Math.random() - 0.5) * 15,
+        y: cy + (d.iy || 0) * scale + (Math.random() - 0.5) * 15,
+        vx: 0, vy: 0,
+        visible: false, opacity: 0, spawnTime: null,
+        pulsePhase: pp,
+        shape: genShape(18 + Math.floor(Math.random() * 6)),
+        craters: genCraters(3 + Math.floor(Math.random() * 4)),
+        rotSpeed: (Math.random() - 0.5) * 0.0004,
+        rotOffset: Math.random() * TAU,
+        textures: Array.from({ length: 10 }, (_, i) => ({
+          dx: Math.sin(i * 1.9 + pp) * 0.65,
+          dy: Math.cos(i * 2.3 + pp) * 0.65,
+          s: 0.08 + Math.random() * 0.14,
+          a: 0.06 + Math.random() * 0.1,
+        })),
+      };
+      nodes.push(n);
+      nodeMap[d.id] = n;
+      showNode(d.id, now);
+    }
+
+    function addLiveEdge(sourceId, targetId, color, width, now) {
+      const src = nodeMap[sourceId], tgt = nodeMap[targetId];
+      if (!src || !tgt) return;   // nodes not yet created — skip
+      if (edges.find(e => e.source.id === sourceId && e.target.id === targetId)) return;
+      edges.push({ source: src, target: tgt, color, width, visible: false, opacity: 0, spawnTime: null });
+      showEdge(sourceId, targetId, now);
+    }
+
+    // Status color map
+    const _statusColors = {
+      building:  '#FDB813',
+      deployed:  '#06d6a0',
+      failed:    '#e94560',
+      skipped:   '#8d99ae',
+    };
+
     function makeBurst(x, y, color) {
       return Array.from({ length: 20 }, () => {
         const a = Math.random() * TAU, sp = 1 + Math.random() * 4;
@@ -1053,9 +941,9 @@
       buildGraph(); bursts = []; pulses = []; shootingStars = [];
       camZoom = 1; panX = 0; panY = 0;
       animStart = performance.now(); lastTime = animStart;
-      timelineIdx = 0; introShown = true; typedLen = 0;
-      document.getElementById('intro').classList.remove('hide');
-      document.getElementById('phase').textContent = '';
+      introShown = false; typedLen = 0;
+      document.getElementById('intro').classList.add('hide');
+      document.getElementById('phase').textContent = 'Waiting for pipeline…';
       document.getElementById('stats').textContent = '0 nodes · 0 edges';
     }
 
@@ -1074,17 +962,6 @@
           document.getElementById('intro').classList.add('hide'); introShown = false; animStart = ts;
         }
         render(ts); requestAnimationFrame(loop); return;
-      }
-
-      const t = ts - animStart;
-
-      // Timeline
-      while (timelineIdx < timeline.length && t >= timeline[timelineIdx].t) {
-        const step = timeline[timelineIdx];
-        if (step.phase) document.getElementById('phase').textContent = step.phase;
-        if (step.spawn) step.spawn.forEach(id => showNode(id, ts));
-        if (step.link) step.link.forEach(([s, targ]) => showEdge(s, targ, ts));
-        timelineIdx++;
       }
 
       physics(dt);
@@ -1121,9 +998,53 @@
       requestAnimationFrame(loop);
     }
 
-    document.getElementById('replay-btn').addEventListener('click', startAnimation);
+    // ── SSE connection ────────────────────────────────────────────────────────────
+    let _evtSource = null;
+
+    function connectSSE() {
+      if (_evtSource) { _evtSource.close(); _evtSource = null; }
+      _evtSource = new EventSource('/events');
+
+      _evtSource.addEventListener('node', e => {
+        const d = JSON.parse(e.data);
+        if (d.id === 'prompt' && !GOAL_TEXT) {
+          GOAL_TEXT = d.label;
+          document.getElementById('typed').textContent = GOAL_TEXT;
+        }
+        addLiveNode(d, performance.now());
+      });
+
+      _evtSource.addEventListener('edge', e => {
+        const d = JSON.parse(e.data);
+        addLiveEdge(d.source, d.target, d.color, d.width, performance.now());
+      });
+
+      _evtSource.addEventListener('phase', e => {
+        const d = JSON.parse(e.data);
+        document.getElementById('phase').textContent = d.text;
+      });
+
+      _evtSource.addEventListener('status', e => {
+        const d = JSON.parse(e.data);
+        const n = nodeMap[d.id];
+        if (!n) return;
+        const c = _statusColors[d.status];
+        if (c) n.color = c;
+      });
+
+      _evtSource.addEventListener('done', () => {
+        _evtSource.close();
+        _evtSource = null;
+      });
+    }
+
+    document.getElementById('replay-btn').addEventListener('click', () => {
+      startAnimation();
+      connectSSE();
+    });
     startAnimation();
     requestAnimationFrame(loop);
+    connectSSE();
   </script>
 </body>
 
