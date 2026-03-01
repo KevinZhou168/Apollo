@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-demo.py — End-to-end demonstration of the Atlas dynamic toolbox.
+demo.py — End-to-end demonstration of the Apollo dynamic toolbox.
 
 This script demonstrates the full workflow:
 1. Generate tools from a goal
@@ -33,12 +33,12 @@ def run_command(cmd: list[str], description: str) -> bool:
 
 
 def main():
-    """Run the full Atlas demo."""
+    """Run the full Apollo demo."""
     
     print("""
 ╔══════════════════════════════════════════════════════════════════════╗
 ║                                                                      ║
-║                         ATLAS DEMO                                   ║
+║                         APOLLO DEMO                                   ║
 ║                   Dynamic Agentic Toolbox                            ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
@@ -156,7 +156,7 @@ Press Ctrl+C at any time to cancel.
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
-You've just seen the full Atlas workflow:
+You've just seen the full Apollo workflow:
 
   ✓ Generated custom MCP tools from a natural language goal
   ✓ Deployed them to Modal serverless infrastructure

@@ -1,10 +1,10 @@
-# Atlas
+# Apollo
 
 **Dynamic Agentic Toolbox** — An AI system that generates, deploys, and orchestrates custom tools on-demand.
 
 ## Overview
 
-Atlas is an agentic framework that dynamically creates MCP (Model Context Protocol) tools based on user prompts. Instead of using a fixed set of tools, Atlas generates exactly what it needs, deploys them to Modal serverless infrastructure, and uses them to solve complex tasks.
+Apollo is an agentic framework that dynamically creates MCP (Model Context Protocol) tools based on user prompts. Instead of using a fixed set of tools, Apollo generates exactly what it needs, deploys them to Modal serverless infrastructure, and uses them to solve complex tasks.
 
 ### Key Features
 
@@ -92,7 +92,7 @@ I found 47 recent papers on quantum error correction from 2024...
 ## Project Structure
 
 ```
-Atlas/
+Apollo/
 ├── supervisor.py              # Main agentic supervisor
 ├── tools_builder.py           # MCP generation & deployment  
 ├── mcp_builder.py            # Code generation library

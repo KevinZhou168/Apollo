@@ -1,5 +1,5 @@
 """
-ui_server.py — Simple web UI for the Atlas supervisor.
+ui_server.py — Simple web UI for the Apollo supervisor.
 
 Usage:
     python ui_server.py            # starts on http://localhost:8080
@@ -25,7 +25,7 @@ from sse_starlette.sse import EventSourceResponse
 
 UI_DIR = Path(__file__).parent / "ui"
 SUPERVISOR_PATH = Path(__file__).parent / "supervisor.py"
-SENTINEL = "ATLAS_DONE_SENTINEL_XYZ"
+SENTINEL = "APOLLO_DONE_SENTINEL_XYZ"
 
 
 async def homepage(request: Request):
@@ -41,7 +41,7 @@ async def run_stream(request: Request):
             return
 
         # Create temp dir for this run's output file
-        tmp_dir = tempfile.mkdtemp(prefix="atlas_")
+        tmp_dir = tempfile.mkdtemp(prefix="apollo_")
         tmpfile = os.path.join(tmp_dir, "output.txt")
 
         # Run supervisor with stdout/stderr inherited by the VS Code terminal,
@@ -119,6 +119,6 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
 
-    print(f"\n  Atlas UI  →  http://localhost:{args.port}")
+    print(f"\n  Apollo UI  →  http://localhost:{args.port}")
     print(f"  Visualization  →  http://localhost:8765  (start viz_server.py separately)\n")
     uvicorn.run(app, host="0.0.0.0", port=args.port)

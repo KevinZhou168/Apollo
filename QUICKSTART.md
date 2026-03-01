@@ -1,8 +1,8 @@
 """
-QUICKSTART GUIDE — Atlas Dynamic Toolbox
+QUICKSTART GUIDE — Apollo Dynamic Toolbox
 =========================================
 
-Atlas is an agentic system with a dynamic toolbox that:
+Apollo is an agentic system with a dynamic toolbox that:
 1. Takes a user prompt
 2. Generates custom MCP tools on demand
 3. Deploys them to Modal

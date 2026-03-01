@@ -1,5 +1,5 @@
 """
-backend.py — Atlas backend + UI server.
+backend.py — Apollo backend + UI server.
 
 Usage:
     python backend.py            # http://localhost:8080
@@ -142,5 +142,5 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
 
-    print(f"\n  Atlas  →  http://localhost:{args.port}\n")
+    print(f"\n  Apollo  →  http://localhost:{args.port}\n")
     uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="warning")

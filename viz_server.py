@@ -1,4 +1,4 @@
-"""viz_server.py — Tiny SSE visualization server for the Atlas pipeline.
+"""viz_server.py — Tiny SSE visualization server for the Apollo pipeline.
 
 Serves demo/index.html at GET / and a live Server-Sent Events stream at
 GET /events.  Call emit() from tools_builder.py to push events to any
@@ -91,7 +91,7 @@ def start_viz_server(port: int = 8765, open_browser: bool = True) -> None:
 
 if __name__ == "__main__":
     import time
-    print(f"\n  Atlas Visualization  →  http://localhost:8765\n")
+    print(f"\n  Apollo Visualization  →  http://localhost:8765\n")
     start_viz_server(port=8765, open_browser=True)
     # Keep main thread alive (daemon thread exits when main exits)
     try:

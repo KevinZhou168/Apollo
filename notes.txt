@@ -35,9 +35,3 @@ curl -N -X POST https://dhanishnatarajan--geopolitical-news-mcp-web.modal.run/mc
 npx @modelcontextprotocol/inspector
 
 modal secret create anthropic-secret ANTHROPIC_API_KEY=sk-ant-…
-
-example prompts:
-
-Plan me a trip to spain
-
-Plan me a trip to spain with a budget of $2000, with 4 friends, I want a moderate pace, and I value safety. I am flying from ORD and I will be traveling from 3/14-3/22

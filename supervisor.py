@@ -722,7 +722,7 @@ if __name__ == "__main__":
             traceback.print_exc()
         sys.exit(0)
 
-    print("\n  Atlas Supervisor  —  type your prompt and press Enter, or 'quit' to exit.\n")
+    print("\n  Apollo Supervisor  —  type your prompt and press Enter, or 'quit' to exit.\n")
 
     while True:
         try:

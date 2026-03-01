@@ -461,7 +461,7 @@ def main(goal: str = ""):
 
     # ── 1. Get goal ────────────────────────────────────────────────────────────
     print(f"\n{_C}{_B}╔══════════════════════════════════════════════════╗{_R}")
-    print(f"{_C}{_B}║  ⚡  ATLAS  ·  MCP Server Factory                ║{_R}")
+    print(f"{_C}{_B}║  ⚡  APOLLO  ·  MCP Server Factory               ║{_R}")
     print(f"{_C}{_B}╚══════════════════════════════════════════════════╝{_R}")
     start_viz_server(port=8765)
     if not goal:

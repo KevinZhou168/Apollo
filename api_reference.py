@@ -525,7 +525,7 @@ def scrape_api_docs(url: str, timeout: int = 15) -> str:
     # Step 3: Raw fallback
     try:
         resp = requests.get(url, timeout=timeout, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; AtlasMCPBuilder/1.0)"
+            "User-Agent": "Mozilla/5.0 (compatible; ApolloMCPBuilder/1.0)"
         })
         resp.raise_for_status()
         text = _html_to_text(resp.text)
