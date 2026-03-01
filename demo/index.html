@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apollo — Pipeline Visualizer</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400&display=swap"
+    rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #050510;
+      font-family: 'Inter', system-ui, sans-serif
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%
+    }
+
+    #hud {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      pointer-events: none;
+      z-index: 10
+    }
+
+    #hud * {
+      pointer-events: auto
+    }
+
+    .hud-left {
+      display: flex;
+      align-items: center;
+      gap: 16px
+    }
+
+    .hud-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f0a500;
+      letter-spacing: 2px;
+      text-transform: uppercase
+    }
+
+    .hud-stats {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    .hud-center {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.35);
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    .hud-phase {
+      font-size: 13px;
+      font-weight: 500;
+      color: #4cc9f0;
+      transition: all 0.5s;
+      text-align: right
+    }
+
+    #intro {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      background: #050510;
+      transition: opacity 0.8s
+    }
+
+    #intro.hide {
+      opacity: 0;
+      pointer-events: none
+    }
+
+    .terminal {
+      background: rgba(10, 10, 25, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 24px 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      color: #e6edf3;
+      box-shadow: 0 0 80px rgba(100, 60, 200, 0.15)
+    }
+
+    .terminal .prompt {
+      color: #f0a500
+    }
+
+    .terminal .cursor {
+      display: inline-block;
+      width: 8px;
+      height: 18px;
+      background: #f0a500;
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite
+    }
+
+    @keyframes blink {
+      50% {
+        opacity: 0
+      }
+    }
+
+    #replay-btn {
+      position: fixed;
+      bottom: 20px;
+      right: 24px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.5);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      cursor: pointer;
+      z-index: 10;
+      transition: all 0.3s
+    }
+
+    #replay-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: rgba(255, 255, 255, 0.8)
+    }
+
+    #tooltip {
+      position: fixed;
+      background: rgba(8, 8, 20, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.8);
+      pointer-events: none;
+      z-index: 15;
+      display: none;
+      max-width: 240px;
+      backdrop-filter: blur(8px)
+    }
+
+    #tooltip .tt-name {
+      font-weight: 600;
+      margin-bottom: 2px
+    }
+
+    #tooltip .tt-desc {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 10px
+    }
+
+    #detail-panel {
+      position: fixed;
+      top: 50px;
+      right: -360px;
+      width: 340px;
+      max-height: calc(100vh - 100px);
+      background: rgba(10, 10, 25, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 20px 24px;
+      z-index: 20;
+      transition: right 0.35s ease;
+      backdrop-filter: blur(12px);
+      overflow-y: auto;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.85)
+    }
+
+    #detail-panel.open {
+      right: 20px
+    }
+
+    #detail-panel .dp-close {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.4);
+      font-size: 18px;
+      cursor: pointer
+    }
+
+    #detail-panel .dp-close:hover {
+      color: #fff
+    }
+
+    #detail-panel .dp-label {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 6px
+    }
+
+    #detail-panel .dp-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 12px
+    }
+
+    #detail-panel .dp-desc {
+      color: rgba(255, 255, 255, 0.55);
+      font-size: 12px;
+      line-height: 1.6;
+      margin-bottom: 14px
+    }
+
+    #detail-panel .dp-info {
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 12px;
+      line-height: 1.7;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 14px
+    }
+
+    #detail-panel .dp-endpoint {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.3);
+      word-break: break-all;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06)
+    }
+
+    #detail-panel .dp-tool {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06)
+    }
+
+    #detail-panel .dp-tool:last-child {
+      border-bottom: none
+    }
+
+    #detail-panel .dp-tool-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: #4cc9f0;
+      margin-bottom: 4px
+    }
+
+    #detail-panel .dp-tool-desc {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.55);
+      line-height: 1.5;
+      margin-bottom: 6px
+    }
+
+    #detail-panel .dp-params {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px
+    }
+
+    #detail-panel .dp-param {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.7)
+    }
+
+    #detail-panel .dp-type {
+      color: rgba(255, 255, 255, 0.3);
+      font-size: 9px
+    }
+
+    #detail-panel .dp-opt {
+      color: rgba(255, 255, 255, 0.25);
+      font-size: 9px;
+      font-style: italic
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="c"></canvas>
+
+  <div id="hud">
+    <div class="hud-left">
+      <div class="hud-title">Apollo</div>
+      <div class="hud-stats" id="stats">0 nodes · 0 edges</div>
+    </div>
+    <div class="hud-center" id="clock"></div>
+    <div class="hud-phase" id="phase"></div>
+  </div>
+
+  <div id="intro">
+    <div class="terminal">
+      <span class="prompt">&gt; </span><span id="typed"></span><span class="cursor"></span>
+    </div>
+  </div>
+
+  <div id="tooltip">
+    <div class="tt-name"></div>
+    <div class="tt-desc"></div>
+  </div>
+
+  <div id="detail-panel">
+    <button class="dp-close"
+      onclick="document.getElementById('detail-panel').classList.remove('open');selectedNode=null">&times;</button>
+    <div class="dp-label" id="dp-label"></div>
+    <div class="dp-badge" id="dp-badge"></div>
+    <div class="dp-desc" id="dp-desc"></div>
+    <div class="dp-info" id="dp-info"></div>
+  </div>
+
+  <button id="replay-btn">⟳ Replay</button>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const TAU = Math.PI * 2;
+    let W, H, dpr;
+
+    function resize() {
+      dpr = window.devicePixelRatio || 1;
+      W = window.innerWidth; H = window.innerHeight;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ── Palette ──────────────────────────────────────────────────────────────────
+    const P = {
+      prompt: '#e94560', super: '#f0a500', builder: '#f72585',
+      agent: '#7b2cbf', server: '#4361ee', tool: '#4cc9f0',
+      valid: '#06d6a0', gold: '#d4a53c', silver: '#8d99ae',
+    };
+
+    // ── Utilities ────────────────────────────────────────────────────────────────
+    function hexToRgb(h) { const v = parseInt(h.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255] }
+    function rgba(hex, a) { const [r, g, b] = hexToRgb(hex); return `rgba(${r},${g},${b},${a})` }
+    function lighten(hex, pct) { const [r, g, b] = hexToRgb(hex); const f = pct / 100; return `rgb(${Math.min(255, r + 255 * f) | 0},${Math.min(255, g + 255 * f) | 0},${Math.min(255, b + 255 * f) | 0})` }
+    function darken(hex, pct) { const [r, g, b] = hexToRgb(hex); const f = 1 - pct / 100; return `rgb(${r * f | 0},${g * f | 0},${b * f | 0})` }
+
+    // ── Asteroid shape generator ─────────────────────────────────────────────────
+    function genShape(segs = 20) {
+      const raw = Array.from({ length: segs }, () => 0.78 + Math.random() * 0.44);
+      // Smooth pass
+      return raw.map((v, i) => {
+        const prev = raw[(i - 1 + segs) % segs], next = raw[(i + 1) % segs];
+        return prev * 0.25 + v * 0.5 + next * 0.25;
+      });
+    }
+    function genCraters(count) {
+      return Array.from({ length: count }, () => ({
+        ang: Math.random() * TAU,
+        dist: 0.15 + Math.random() * 0.45,
+        size: 0.06 + Math.random() * 0.12,
+      }));
+    }
+
+    // ── Graph Data — populated live via SSE from viz_server.py ──────────────────
+    const nodeDefs = [];
+    const edgeDefs = [];
+
+    // ── Runtime ──────────────────────────────────────────────────────────────────
+    let nodes = [], edges = [], nodeMap = {};
+    let bursts = [], pulses = [], bgStars = [], shootingStars = [];
+
+    function buildGraph() {
+      nodes = []; edges = []; nodeMap = {};
+      const cx = W / 2, cy = H / 2;
+      const scale = Math.min(W, H) / 900;
+      nodeDefs.forEach(d => {
+        const pp = Math.random() * TAU;
+        const n = {
+          ...d,
+          x: cx + d.ix * scale + (Math.random() - 0.5) * 15,
+          y: cy + d.iy * scale + (Math.random() - 0.5) * 15,
+          vx: 0, vy: 0,
+          visible: false, opacity: 0, spawnTime: null,
+          pulsePhase: pp,
+          shape: genShape(18 + Math.floor(Math.random() * 6)),
+          craters: genCraters(3 + Math.floor(Math.random() * 4)),
+          rotSpeed: (Math.random() - 0.5) * 0.0004,
+          rotOffset: Math.random() * TAU,
+          // Pre-computed surface texture (avoids Math.random in render loop)
+          textures: Array.from({ length: 10 }, (_, i) => ({
+            dx: Math.sin(i * 1.9 + pp) * 0.65,
+            dy: Math.cos(i * 2.3 + pp) * 0.65,
+            s: 0.08 + Math.random() * 0.14,
+            a: 0.06 + Math.random() * 0.1,
+          })),
+        };
+        nodes.push(n);
+        nodeMap[d.id] = n;
+      });
+      edgeDefs.forEach(([s, t, c, w]) => {
+        if (!nodeMap[s] || !nodeMap[t]) return;
+        edges.push({
+          source: nodeMap[s], target: nodeMap[t],
+          color: c, width: w,
+          visible: false, opacity: 0, spawnTime: null,
+        });
+      });
+      // Stars — varied colors for space theme
+      bgStars = Array.from({ length: 200 }, () => {
+        const temp = Math.random();
+        const color = temp < 0.6 ? '#ffffff' : temp < 0.8 ? '#aaccff' : temp < 0.9 ? '#ffddaa' : '#ffaaaa';
+        return {
+          x: Math.random() * W, y: Math.random() * H,
+          size: Math.random() < 0.92 ? 0.3 + Math.random() * 1.0 : 1.5 + Math.random() * 1.5,
+          phase: Math.random() * TAU,
+          speed: 0.001 + Math.random() * 0.004,
+          color,
+        };
+      });
+    }
+
+    // ── Live SSE state ────────────────────────────────────────────────────────────
+    let GOAL_TEXT = '';   // filled from first 'node' event with id==='prompt'
+
+    let animStart = 0, lastTime = 0;
+    let introShown = true, typedLen = 0;
+
+    function showNode(id, now) { const n = nodeMap[id]; if (!n || n.visible) return; n.visible = true; n.spawnTime = now; bursts.push(makeBurst(n.x, n.y, n.color)) }
+    function showEdge(sId, tId, now) { const e = edges.find(e => e.source.id === sId && e.target.id === tId); if (!e || e.visible) return; e.visible = true; e.spawnTime = now }
+
+    // ── Dynamic node/edge creation (called from SSE handlers) ────────────────────
+    function addLiveNode(d, now) {
+      if (nodeMap[d.id]) return;   // already exists — skip duplicate
+      const cx = W / 2, cy = H / 2;
+      const scale = Math.min(W, H) / 900;
+      const pp = Math.random() * TAU;
+      const n = {
+        ...d,
+        x: cx + (d.ix || 0) * scale + (Math.random() - 0.5) * 15,
+        y: cy + (d.iy || 0) * scale + (Math.random() - 0.5) * 15,
+        vx: 0, vy: 0,
+        visible: false, opacity: 0, spawnTime: null,
+        pulsePhase: pp,
+        shape: genShape(18 + Math.floor(Math.random() * 6)),
+        craters: genCraters(3 + Math.floor(Math.random() * 4)),
+        rotSpeed: (Math.random() - 0.5) * 0.0004,
+        rotOffset: Math.random() * TAU,
+        textures: Array.from({ length: 10 }, (_, i) => ({
+          dx: Math.sin(i * 1.9 + pp) * 0.65,
+          dy: Math.cos(i * 2.3 + pp) * 0.65,
+          s: 0.08 + Math.random() * 0.14,
+          a: 0.06 + Math.random() * 0.1,
+        })),
+      };
+      nodes.push(n);
+      nodeMap[d.id] = n;
+      showNode(d.id, now);
+    }
+
+    function addLiveEdge(sourceId, targetId, color, width, now) {
+      const src = nodeMap[sourceId], tgt = nodeMap[targetId];
+      if (!src || !tgt) return;   // nodes not yet created — skip
+      if (edges.find(e => e.source.id === sourceId && e.target.id === targetId)) return;
+      edges.push({ source: src, target: tgt, color, width, visible: false, opacity: 0, spawnTime: null });
+      showEdge(sourceId, targetId, now);
+    }
+
+    // Status color map
+    const _statusColors = {
+      building:  '#FDB813',
+      deployed:  '#06d6a0',
+      failed:    '#e94560',
+      skipped:   '#8d99ae',
+    };
+
+    function makeBurst(x, y, color) {
+      return Array.from({ length: 20 }, () => {
+        const a = Math.random() * TAU, sp = 1 + Math.random() * 4;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1, color, size: 1 + Math.random() * 3 };
+      });
+    }
+
+    // ── Physics ──────────────────────────────────────────────────────────────────
+    const PHY = { repulsion: 2000, attraction: 0.008, damping: 0.7, centering: 0.001, maxV: 4 };
+    function physics(dt) {
+      const active = nodes.filter(n => n.visible);
+      const cx = W / 2, cy = H / 2;
+      for (let i = 0; i < active.length; i++) {
+        for (let j = i + 1; j < active.length; j++) {
+          const a = active[i], b = active[j];
+          let dx = b.x - a.x, dy = b.y - a.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const f = PHY.repulsion / (dist * dist);
+          const fx = (dx / dist) * f, fy = (dy / dist) * f;
+          a.vx -= fx * dt; a.vy -= fy * dt; b.vx += fx * dt; b.vy += fy * dt;
+        }
+      }
+      edges.filter(e => e.visible).forEach(e => {
+        const s = e.source, t = e.target;
+        if (!s.visible || !t.visible) return;
+        let dx = t.x - s.x, dy = t.y - s.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const rest = 60 + (s.r + t.r);
+        const f = (dist - rest) * PHY.attraction * dt;
+        const fx = (dx / dist) * f, fy = (dy / dist) * f;
+        s.vx += fx; s.vy += fy; t.vx -= fx; t.vy -= fy;
+      });
+      active.forEach(n => {
+        if (n === dragNode) return;
+        n.vx += (cx - n.x) * PHY.centering * dt;
+        n.vy += (cy - n.y) * PHY.centering * dt;
+        n.vx *= PHY.damping; n.vy *= PHY.damping;
+        const speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
+        if (speed > PHY.maxV) { n.vx *= PHY.maxV / speed; n.vy *= PHY.maxV / speed }
+        n.x += n.vx * dt; n.y += n.vy * dt;
+      });
+    }
+
+    // ── Celestial Body Renderer ──────────────────────────────────────────────────
+    function drawBody(n, now) {
+      const age = now - n.spawnTime;
+      n.opacity = Math.min(1, age / 500);
+      const o = n.opacity;
+      const pulse = 1 + 0.03 * Math.sin(now * 0.003 + n.pulsePhase);
+      const r = n.r * pulse;
+      ctx.globalAlpha = o;
+
+      if (n.bt === 'sun') {
+        // ── SUN ──────────────────────────────
+        const coronaPulse = 1 + 0.08 * Math.sin(now * 0.002);
+        // Outer corona
+        const c3 = ctx.createRadialGradient(n.x, n.y, r * 0.3, n.x, n.y, r * 3.5 * coronaPulse);
+        c3.addColorStop(0, 'rgba(253,184,19,0.25)');
+        c3.addColorStop(0.25, 'rgba(245,130,13,0.12)');
+        c3.addColorStop(0.5, 'rgba(226,59,12,0.04)');
+        c3.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x, n.y, r * 3.5 * coronaPulse, 0, TAU);
+        ctx.fillStyle = c3; ctx.fill();
+        // Inner corona
+        const c2 = ctx.createRadialGradient(n.x, n.y, r * 0.8, n.x, n.y, r * 1.8);
+        c2.addColorStop(0, 'rgba(255,220,100,0.35)');
+        c2.addColorStop(0.5, 'rgba(253,184,19,0.15)');
+        c2.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x, n.y, r * 1.8, 0, TAU);
+        ctx.fillStyle = c2; ctx.fill();
+        // Sun body
+        const sg = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r);
+        sg.addColorStop(0, '#FFFDE8');   // white-hot center
+        sg.addColorStop(0.2, '#FFF3B0'); // bright yellow
+        sg.addColorStop(0.5, '#FDB813'); // golden
+        sg.addColorStop(0.8, '#F5820D'); // orange
+        sg.addColorStop(1, '#E23B0C');   // red edge
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU);
+        ctx.fillStyle = sg; ctx.fill();
+        // Surface texture (sunspots)
+        n.textures.forEach((t, i) => {
+          if (i > 3) return;
+          ctx.beginPath(); ctx.arc(n.x + t.dx * r * 0.6, n.y + t.dy * r * 0.6, r * t.s * 0.7, 0, TAU);
+          ctx.fillStyle = 'rgba(200,100,0,0.15)'; ctx.fill();
+        });
+
+      } else if (n.bt === 'planet') {
+        // ── PLANET — per-type rendering ──────
+        // Atmospheric glow
+        const atm = ctx.createRadialGradient(n.x, n.y, r * 0.9, n.x, n.y, r * 1.7);
+        atm.addColorStop(0, rgba(n.color, 0.2));
+        atm.addColorStop(0.5, rgba(n.color, 0.06));
+        atm.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x, n.y, r * 1.7, 0, TAU);
+        ctx.fillStyle = atm; ctx.fill();
+
+        // Saturn ring — draw BEHIND the planet first
+        if (n.pt === 'saturn') {
+          ctx.save();
+          ctx.translate(n.x, n.y);
+          ctx.scale(1, 0.35);
+          // Outer ring
+          ctx.beginPath(); ctx.arc(0, 0, r * 1.8, 0, TAU);
+          ctx.strokeStyle = 'rgba(210,190,140,0.4)'; ctx.lineWidth = r * 0.25; ctx.stroke();
+          // Inner ring
+          ctx.beginPath(); ctx.arc(0, 0, r * 1.45, 0, TAU);
+          ctx.strokeStyle = 'rgba(180,160,120,0.3)'; ctx.lineWidth = r * 0.15; ctx.stroke();
+          ctx.restore();
+        }
+
+        // Planet body
+        ctx.save();
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.clip();
+
+        // Base sphere gradient
+        const pg = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.3, r * 0.05, n.x, n.y, r);
+
+        if (n.pt === 'earth') {
+          // Earth — ocean blue with green land patches
+          pg.addColorStop(0, '#8cc4e8'); pg.addColorStop(0.3, '#4488cc');
+          pg.addColorStop(0.7, '#2266aa'); pg.addColorStop(1, '#0a3060');
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+          // Continents (green/brown patches)
+          const lands = [{ x: 0.15, y: -0.2, s: 0.3 }, { x: -0.3, y: 0.1, s: 0.25 }, { x: 0.35, y: 0.25, s: 0.2 }, { x: -0.1, y: -0.4, s: 0.18 }];
+          lands.forEach(l => {
+            ctx.beginPath(); ctx.arc(n.x + l.x * r, n.y + l.y * r, r * l.s, 0, TAU);
+            ctx.fillStyle = 'rgba(60,120,50,0.35)'; ctx.fill();
+          });
+          // Clouds
+          ctx.fillStyle = 'rgba(255,255,255,0.12)';
+          ctx.fillRect(n.x - r, n.y - r * 0.1, r * 2, r * 0.15);
+          ctx.fillRect(n.x - r * 0.5, n.y + r * 0.3, r * 1.2, r * 0.1);
+
+        } else if (n.pt === 'jupiter') {
+          // Jupiter — tan/orange with strong bands
+          pg.addColorStop(0, '#e8c88a'); pg.addColorStop(0.3, '#c8a060');
+          pg.addColorStop(0.7, '#a07840'); pg.addColorStop(1, '#604828');
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+          // Horizontal bands
+          const bands = [-0.6, -0.35, -0.1, 0.15, 0.4, 0.65];
+          bands.forEach((b, i) => {
+            ctx.fillStyle = i % 2 === 0 ? 'rgba(180,120,60,0.25)' : 'rgba(220,180,120,0.2)';
+            ctx.fillRect(n.x - r, n.y + b * r, r * 2, r * 0.18);
+          });
+          // Great Red Spot
+          ctx.beginPath(); ctx.ellipse(n.x + r * 0.2, n.y + r * 0.2, r * 0.18, r * 0.12, 0, 0, TAU);
+          ctx.fillStyle = 'rgba(180,80,40,0.3)'; ctx.fill();
+
+        } else if (n.pt === 'saturn') {
+          // Saturn — golden/amber
+          pg.addColorStop(0, '#e8d090'); pg.addColorStop(0.3, '#c4a44a');
+          pg.addColorStop(0.7, '#a08030'); pg.addColorStop(1, '#605020');
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+          // Subtle bands
+          for (let b = -2; b <= 2; b++) {
+            ctx.fillStyle = 'rgba(200,180,120,0.12)';
+            ctx.fillRect(n.x - r, n.y + b * r * 0.3, r * 2, r * 0.12);
+          }
+
+        } else if (n.pt === 'mars') {
+          // Mars — rusty red
+          pg.addColorStop(0, '#d4956a'); pg.addColorStop(0.3, '#c1440e');
+          pg.addColorStop(0.7, '#8b2500'); pg.addColorStop(1, '#4a1000');
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+          // Dark patches (Syrtis Major etc)
+          ctx.beginPath(); ctx.arc(n.x - r * 0.15, n.y + r * 0.1, r * 0.25, 0, TAU);
+          ctx.fillStyle = 'rgba(60,20,0,0.2)'; ctx.fill();
+          // Polar ice cap
+          ctx.beginPath(); ctx.arc(n.x, n.y - r * 0.85, r * 0.3, 0, TAU);
+          ctx.fillStyle = 'rgba(255,240,230,0.25)'; ctx.fill();
+
+        } else if (n.pt === 'venus') {
+          // Venus — pale yellow/orange, thick haze
+          pg.addColorStop(0, '#e8d8a0'); pg.addColorStop(0.3, '#d4a84b');
+          pg.addColorStop(0.7, '#b08830'); pg.addColorStop(1, '#705020');
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+          // Swirling haze
+          ctx.fillStyle = 'rgba(230,210,150,0.12)';
+          ctx.fillRect(n.x - r, n.y - r * 0.2, r * 2, r * 0.35);
+
+        } else if (n.pt === 'neptune') {
+          // Neptune — deep icy blue
+          pg.addColorStop(0, '#6699cc'); pg.addColorStop(0.3, '#4466aa');
+          pg.addColorStop(0.7, '#223388'); pg.addColorStop(1, '#111844');
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+          // Dark spot
+          ctx.beginPath(); ctx.ellipse(n.x - r * 0.1, n.y - r * 0.15, r * 0.2, r * 0.12, 0.2, 0, TAU);
+          ctx.fillStyle = 'rgba(10,20,60,0.3)'; ctx.fill();
+
+        } else if (n.pt === 'mercury') {
+          // Mercury — dark gray, cratered
+          pg.addColorStop(0, '#b0a8a0'); pg.addColorStop(0.3, '#8a8078');
+          pg.addColorStop(0.7, '#605850'); pg.addColorStop(1, '#302820');
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+          // Craters
+          n.craters.forEach(c => {
+            ctx.beginPath(); ctx.arc(n.x + Math.cos(c.ang) * r * c.dist, n.y + Math.sin(c.ang) * r * c.dist, r * c.size, 0, TAU);
+            ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fill();
+          });
+
+        } else if (n.pt === 'uranus') {
+          // Uranus — pale cyan/teal
+          pg.addColorStop(0, '#b0dde8'); pg.addColorStop(0.3, '#88ccdd');
+          pg.addColorStop(0.7, '#5599aa'); pg.addColorStop(1, '#2a5560');
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+
+        } else {
+          // Generic planet fallback
+          pg.addColorStop(0, lighten(n.color, 45)); pg.addColorStop(0.3, lighten(n.color, 15));
+          pg.addColorStop(0.7, n.color); pg.addColorStop(1, darken(n.color, 50));
+          ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+        }
+        ctx.restore();
+
+        // Specular highlight (on top, outside clip)
+        const sp = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.3, 0, n.x - r * 0.3, n.y - r * 0.3, r * 0.5);
+        sp.addColorStop(0, 'rgba(255,255,255,0.35)');
+        sp.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.beginPath(); ctx.arc(n.x - r * 0.3, n.y - r * 0.3, r * 0.5, 0, TAU);
+        ctx.fillStyle = sp; ctx.fill();
+
+      } else if (n.bt === 'moon') {
+        // ── MOON (rocky, gray, cratered) ─────
+        const rot = n.rotOffset + now * n.rotSpeed;
+        const segs = n.shape.length;
+        const pts = [];
+        for (let i = 0; i < segs; i++) {
+          const angle = (i / segs) * TAU + rot;
+          const rad = r * n.shape[i];
+          pts.push({ x: n.x + Math.cos(angle) * rad, y: n.y + Math.sin(angle) * rad });
+        }
+        // Faint glow
+        const mg = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, r * 1.6);
+        mg.addColorStop(0, rgba(n.color, 0.15));
+        mg.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x, n.y, r * 1.6, 0, TAU);
+        ctx.fillStyle = mg; ctx.fill();
+        // Rocky body
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i <= segs; i++) {
+          const curr = pts[i % segs], prev = pts[(i - 1) % segs];
+          ctx.quadraticCurveTo(prev.x, prev.y, (prev.x + curr.x) / 2, (prev.y + curr.y) / 2);
+        }
+        ctx.closePath();
+        const rg = ctx.createRadialGradient(n.x - r * 0.25, n.y - r * 0.3, r * 0.05, n.x, n.y, r * 1.1);
+        rg.addColorStop(0, '#b0a898'); rg.addColorStop(0.3, '#8a8078');
+        rg.addColorStop(0.6, '#6b6058'); rg.addColorStop(1, '#2a2420');
+        ctx.fillStyle = rg; ctx.fill();
+        // Textures + craters
+        n.textures.forEach(t => {
+          ctx.beginPath(); ctx.arc(n.x + t.dx * r, n.y + t.dy * r, r * t.s, 0, TAU);
+          ctx.fillStyle = `rgba(0,0,0,${t.a + 0.04})`; ctx.fill();
+        });
+        n.craters.forEach(c => {
+          const cx2 = n.x + Math.cos(c.ang + rot) * r * c.dist;
+          const cy2 = n.y + Math.sin(c.ang + rot) * r * c.dist;
+          const cs = r * c.size;
+          ctx.beginPath(); ctx.arc(cx2, cy2, cs, 0, TAU);
+          ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fill();
+          ctx.beginPath(); ctx.arc(cx2 - cs * 0.2, cy2 - cs * 0.2, cs * 0.5, 0, TAU);
+          ctx.fillStyle = 'rgba(180,170,155,0.1)'; ctx.fill();
+        });
+        // Specular
+        const ms = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.35, 0, n.x - r * 0.3, n.y - r * 0.35, r * 0.4);
+        ms.addColorStop(0, 'rgba(255,255,240,0.2)'); ms.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x - r * 0.3, n.y - r * 0.35, r * 0.4, 0, TAU);
+        ctx.fillStyle = ms; ctx.fill();
+
+      } else if (n.bt === 'comet') {
+        // ── COMET (icy head with glowing tail) ──
+        // Tail direction: always trails upward (away from tree flow)
+        const tailLen = r * 5;
+        const tailAng = -Math.PI / 2 + Math.sin(now * 0.001 + n.pulsePhase) * 0.15;
+        const tx = Math.cos(tailAng) * tailLen, ty = Math.sin(tailAng) * tailLen;
+        // Tail glow (3 layers, progressively fainter)
+        for (let t = 3; t >= 1; t--) {
+          const w = r * (0.3 + t * 0.35);
+          const tg = ctx.createLinearGradient(n.x, n.y, n.x + tx * (t / 3), n.y + ty * (t / 3));
+          tg.addColorStop(0, rgba(n.color, 0.35 / t));
+          tg.addColorStop(0.4, rgba(n.color, 0.12 / t));
+          tg.addColorStop(1, 'transparent');
+          ctx.beginPath();
+          ctx.moveTo(n.x, n.y - w * 0.3); ctx.quadraticCurveTo(n.x + tx * 0.5 * (t / 3), n.y + ty * 0.5 * (t / 3), n.x + tx * (t / 3), n.y + ty * (t / 3));
+          ctx.quadraticCurveTo(n.x + tx * 0.5 * (t / 3), n.y + ty * 0.5 * (t / 3) + w * 0.1, n.x, n.y + w * 0.3);
+          ctx.closePath();
+          ctx.fillStyle = tg; ctx.fill();
+        }
+        // Coma (fuzzy glow around head)
+        const cg = ctx.createRadialGradient(n.x, n.y, r * 0.3, n.x, n.y, r * 2);
+        cg.addColorStop(0, rgba(n.color, 0.4));
+        cg.addColorStop(0.5, rgba(n.color, 0.1));
+        cg.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x, n.y, r * 2, 0, TAU);
+        ctx.fillStyle = cg; ctx.fill();
+        // Icy core (bright white center)
+        const ig = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r);
+        ig.addColorStop(0, '#ffffff');
+        ig.addColorStop(0.3, lighten(n.color, 50));
+        ig.addColorStop(0.7, n.color);
+        ig.addColorStop(1, darken(n.color, 40));
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, TAU);
+        ctx.fillStyle = ig; ctx.fill();
+        // Specular
+        const cs = ctx.createRadialGradient(n.x - r * 0.2, n.y - r * 0.25, 0, n.x - r * 0.2, n.y - r * 0.25, r * 0.35);
+        cs.addColorStop(0, 'rgba(255,255,255,0.5)'); cs.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x - r * 0.2, n.y - r * 0.25, r * 0.35, 0, TAU);
+        ctx.fillStyle = cs; ctx.fill();
+
+      } else if (n.bt === 'tool_moon') {
+        // ── TOOL MOON (tiny, cyan-glowing) ────────────────────────────────────
+        const rot = n.rotOffset + now * n.rotSpeed;
+        const segs = n.shape.length;
+        const pts = [];
+        for (let i = 0; i < segs; i++) {
+          const angle = (i / segs) * TAU + rot;
+          pts.push({ x: n.x + Math.cos(angle) * r * n.shape[i], y: n.y + Math.sin(angle) * r * n.shape[i] });
+        }
+        // Outer glow
+        const tg = ctx.createRadialGradient(n.x, n.y, r * 0.4, n.x, n.y, r * 3);
+        tg.addColorStop(0, rgba(n.color, 0.35));
+        tg.addColorStop(0.5, rgba(n.color, 0.08));
+        tg.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x, n.y, r * 3, 0, TAU);
+        ctx.fillStyle = tg; ctx.fill();
+        // Rocky body with cyan tint
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i <= segs; i++) {
+          const curr = pts[i % segs], prev = pts[(i - 1) % segs];
+          ctx.quadraticCurveTo(prev.x, prev.y, (prev.x + curr.x) / 2, (prev.y + curr.y) / 2);
+        }
+        ctx.closePath();
+        const trg = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.3, r * 0.05, n.x, n.y, r * 1.1);
+        trg.addColorStop(0, lighten(n.color, 50));
+        trg.addColorStop(0.4, n.color);
+        trg.addColorStop(1, darken(n.color, 55));
+        ctx.fillStyle = trg; ctx.fill();
+        // Craters
+        n.craters.slice(0, 2).forEach(c => {
+          ctx.beginPath();
+          ctx.arc(n.x + Math.cos(c.ang + rot) * r * c.dist * 0.7, n.y + Math.sin(c.ang + rot) * r * c.dist * 0.7, r * c.size * 0.5, 0, TAU);
+          ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill();
+        });
+        // Specular
+        const tsp = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.35, 0, n.x - r * 0.3, n.y - r * 0.35, r * 0.4);
+        tsp.addColorStop(0, 'rgba(255,255,255,0.4)'); tsp.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x - r * 0.3, n.y - r * 0.35, r * 0.4, 0, TAU);
+        ctx.fillStyle = tsp; ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+
+      // Hover ring
+      if (n === hoverNode) {
+        ctx.beginPath(); ctx.arc(n.x, n.y, r + 6, 0, TAU);
+        ctx.strokeStyle = rgba(n.color, 0.5); ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+      }
+      // Label
+      const fontSize = n.r >= 20 ? 12 : n.r >= 14 ? 11 : 10;
+      ctx.font = `500 ${fontSize}px Inter, sans-serif`;
+      ctx.fillStyle = `rgba(255,255,255,${0.75 * n.opacity})`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(n.label, n.x, n.y + r + 8);
+    }
+
+    // ── Rendering ────────────────────────────────────────────────────────────────
+    function render(now) {
+      ctx.clearRect(0, 0, W, H);
+
+      // Deep space background
+      ctx.fillStyle = '#050510';
+      ctx.fillRect(0, 0, W, H);
+
+      // Nebula clouds
+      const nebulae = [
+        { x: W * 0.2, y: H * 0.3, r: W * 0.35, c: 'rgba(60,20,120,0.04)' },
+        { x: W * 0.8, y: H * 0.6, r: W * 0.3, c: 'rgba(20,60,120,0.035)' },
+        { x: W * 0.5, y: H * 0.8, r: W * 0.25, c: 'rgba(20,80,80,0.03)' },
+        { x: W * 0.15, y: H * 0.7, r: W * 0.2, c: 'rgba(100,30,60,0.025)' },
+      ];
+      nebulae.forEach(nb => {
+        const g = ctx.createRadialGradient(nb.x, nb.y, 0, nb.x, nb.y, nb.r);
+        g.addColorStop(0, nb.c); g.addColorStop(1, 'transparent');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      });
+
+      // Stars
+      bgStars.forEach(s => {
+        const a = 0.15 + 0.35 * Math.sin(now * s.speed + s.phase);
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, TAU);
+        ctx.fillStyle = s.color.replace(')', `,${a})`).replace('rgb', 'rgba');
+        // Simpler: just use white with alpha
+        ctx.fillStyle = `rgba(255,255,255,${a * (s.size > 1.2 ? 1 : 0.7)})`;
+        ctx.fill();
+        // Cross sparkle for bright stars
+        if (s.size > 1.3) {
+          ctx.strokeStyle = `rgba(255,255,255,${a * 0.3})`;
+          ctx.lineWidth = 0.5;
+          ctx.beginPath(); ctx.moveTo(s.x - s.size * 3, s.y); ctx.lineTo(s.x + s.size * 3, s.y); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(s.x, s.y - s.size * 3); ctx.lineTo(s.x, s.y + s.size * 3); ctx.stroke();
+        }
+      });
+
+      // Shooting stars
+      shootingStars.forEach(ss => {
+        ctx.beginPath();
+        ctx.moveTo(ss.x, ss.y);
+        ctx.lineTo(ss.x - ss.vx * 12, ss.y - ss.vy * 12);
+        ctx.strokeStyle = `rgba(255,255,255,${ss.life * 0.6})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      });
+
+      // Camera transform — zoom + pan + subtle parallax
+      ctx.save();
+      ctx.translate(panX, panY);
+      ctx.scale(camZoom, camZoom);
+      ctx.translate((mouseX - W / 2) * 0.01 / camZoom, (mouseY - H / 2) * 0.01 / camZoom);
+
+      // ── Edges ──
+      edges.filter(e => e.visible).forEach(e => {
+        const age = now - e.spawnTime;
+        e.opacity = Math.min(1, age / 700);
+        const o = e.opacity;
+        const sx = e.source.x, sy = e.source.y, tx = e.target.x, ty = e.target.y;
+        // Outer glow
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tx, ty);
+        ctx.strokeStyle = rgba(e.color, 0.08 * o); ctx.lineWidth = e.width * 6; ctx.stroke();
+        // Core
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tx, ty);
+        ctx.strokeStyle = rgba(e.color, 0.4 * o); ctx.lineWidth = e.width; ctx.stroke();
+      });
+
+      // ── Pulses ──
+      pulses.forEach(p => {
+        const e = p.edge;
+        const sx = e.source.x, sy = e.source.y, tx = e.target.x, ty = e.target.y;
+        const px = sx + (tx - sx) * p.t, py = sy + (ty - sy) * p.t;
+        const pg = ctx.createRadialGradient(px, py, 0, px, py, 4);
+        pg.addColorStop(0, 'rgba(255,255,255,0.9)');
+        pg.addColorStop(0.5, rgba(e.color, 0.5));
+        pg.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(px, py, 4, 0, TAU); ctx.fillStyle = pg; ctx.fill();
+      });
+
+      // ── Bursts ──
+      bursts.forEach(b => b.forEach(p => {
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, TAU);
+        ctx.fillStyle = rgba(p.color, p.life * 0.6); ctx.fill();
+      }));
+
+      // ── Asteroids ──
+      nodes.filter(n => n.visible).forEach(n => drawBody(n, now));
+
+      ctx.restore();
+    }
+
+    // ── Interaction ──────────────────────────────────────────────────────────────
+    let mouseX = W / 2, mouseY = H / 2, dragNode = null, hoverNode = null, selectedNode = null;
+    let camZoom = 1, panX = 0, panY = 0;
+    let dragStartX = 0, dragStartY = 0, didDrag = false;
+
+    const typeLabels = { sun: '☀ Sun', planet: '🪐 Planet', moon: '🌑 Moon', comet: '☄ Comet', tool_moon: '🛠 Tool' };
+    const typeColors = { sun: '#FDB813', planet: '#6688cc', moon: '#8a8078', comet: '#44ddff', tool_moon: '#8d99ae' };
+
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function screenToWorld(sx, sy) {
+      return { x: (sx - panX) / camZoom, y: (sy - panY) / camZoom };
+    }
+    function hitTest(sx, sy) {
+      const { x, y } = screenToWorld(sx, sy);
+      for (let i = nodes.length - 1; i >= 0; i--) {
+        const n = nodes[i]; if (!n.visible) continue;
+        const dx = x - n.x, dy = y - n.y;
+        if (dx * dx + dy * dy < (n.r + 8) * (n.r + 8)) return n;
+      }
+      return null;
+    }
+    function showDetailPanel(n) {
+      selectedNode = n;
+      const dp = document.getElementById('detail-panel');
+      document.getElementById('dp-label').textContent = n.label;
+      const badge = document.getElementById('dp-badge');
+      badge.textContent = typeLabels[n.bt] || n.bt;
+      badge.style.background = typeColors[n.bt] || '#555';
+      badge.style.color = (n.bt === 'moon' || n.bt === 'tool_moon') ? '#fff' : '#000';
+      document.getElementById('dp-desc').textContent = n.desc;
+
+      const infoEl = document.getElementById('dp-info');
+      if (n.tools_detail && n.tools_detail.length > 0) {
+        infoEl.innerHTML = n.tools_detail.map(t => {
+          const props = t.inputSchema && t.inputSchema.properties ? t.inputSchema.properties : {};
+          const required = (t.inputSchema && t.inputSchema.required) || [];
+          const params = Object.entries(props).map(([k, v]) => {
+            const isOpt = !required.includes(k);
+            return `<span class="dp-param">${esc(k)}<span class="dp-type">${esc(v.type || '')}</span>${isOpt ? '<span class="dp-opt">opt</span>' : ''}</span>`;
+          }).join('');
+          return `<div class="dp-tool">
+            <div class="dp-tool-name">${esc(t.name)}</div>
+            <div class="dp-tool-desc">${esc(t.description || '')}</div>
+            ${params ? `<div class="dp-params">${params}</div>` : ''}
+          </div>`;
+        }).join('') + (n.endpoint ? `<div class="dp-endpoint">${esc(n.endpoint)}</div>` : '');
+      } else {
+        infoEl.textContent = n.info || '';
+      }
+
+      dp.classList.add('open');
+    }
+
+    canvas.addEventListener('mousemove', e => {
+      mouseX = e.clientX; mouseY = e.clientY;
+      if (dragNode) {
+        const w = screenToWorld(mouseX, mouseY);
+        dragNode.x = w.x; dragNode.y = w.y; dragNode.vx = 0; dragNode.vy = 0;
+        const dx = e.clientX - dragStartX, dy = e.clientY - dragStartY;
+        if (dx * dx + dy * dy > 25) didDrag = true;
+        return;
+      }
+      const h = hitTest(mouseX, mouseY); hoverNode = h;
+      canvas.style.cursor = h ? 'grab' : 'default';
+      const tt = document.getElementById('tooltip');
+      if (h) {
+        tt.style.display = 'block'; tt.style.left = (mouseX + 16) + 'px'; tt.style.top = (mouseY - 10) + 'px';
+        tt.querySelector('.tt-name').textContent = h.label; tt.querySelector('.tt-desc').textContent = h.desc;
+      } else { tt.style.display = 'none' }
+    });
+    canvas.addEventListener('mousedown', e => {
+      dragStartX = e.clientX; dragStartY = e.clientY; didDrag = false;
+      const n = hitTest(e.clientX, e.clientY);
+      if (n) { dragNode = n; canvas.style.cursor = 'grabbing'; }
+    });
+    canvas.addEventListener('mouseup', e => {
+      if (dragNode && !didDrag) { showDetailPanel(dragNode); }
+      else if (!dragNode) {
+        const n = hitTest(e.clientX, e.clientY);
+        if (n) showDetailPanel(n);
+        else { document.getElementById('detail-panel').classList.remove('open'); selectedNode = null; }
+      }
+      dragNode = null; canvas.style.cursor = 'default';
+    });
+    canvas.addEventListener('mouseleave', () => { dragNode = null; hoverNode = null; document.getElementById('tooltip').style.display = 'none' });
+
+    // ── Zoom ──
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 0.92 : 1.08;
+      const newZoom = Math.max(0.3, Math.min(3, camZoom * factor));
+      // Zoom toward mouse position
+      const wx = (e.clientX - panX) / camZoom;
+      const wy = (e.clientY - panY) / camZoom;
+      camZoom = newZoom;
+      panX = e.clientX - wx * camZoom;
+      panY = e.clientY - wy * camZoom;
+    }, { passive: false });
+
+    // ── Main Loop ────────────────────────────────────────────────────────────────
+    function startAnimation() {
+      buildGraph(); bursts = []; pulses = []; shootingStars = [];
+      camZoom = 1; panX = 0; panY = 0;
+      animStart = performance.now(); lastTime = animStart;
+      introShown = false; typedLen = 0;
+      document.getElementById('intro').classList.add('hide');
+      document.getElementById('phase').textContent = 'Waiting for pipeline…';
+      document.getElementById('stats').textContent = '0 nodes · 0 edges';
+    }
+
+    function loop(ts) {
+      const dt = Math.min((ts - lastTime) / 16.67, 3); lastTime = ts;
+      const elapsed = ts - animStart;
+
+      // Typewriter
+      if (introShown) {
+        const typeStart = 200, charRate = 55;
+        if (elapsed > typeStart) {
+          typedLen = Math.min(GOAL_TEXT.length, Math.floor((elapsed - typeStart) / charRate));
+          document.getElementById('typed').textContent = GOAL_TEXT.slice(0, typedLen);
+        }
+        if (typedLen >= GOAL_TEXT.length && elapsed > typeStart + GOAL_TEXT.length * charRate + 500) {
+          document.getElementById('intro').classList.add('hide'); introShown = false; animStart = ts;
+        }
+        render(ts); requestAnimationFrame(loop); return;
+      }
+
+      physics(dt);
+
+      // Bursts
+      bursts.forEach(b => b.forEach(p => { p.x += p.vx; p.y += p.vy; p.vx *= 0.96; p.vy *= 0.96; p.life -= 0.018 }));
+      bursts = bursts.map(b => b.filter(p => p.life > 0)).filter(b => b.length > 0);
+
+      // Pulses
+      const ae = edges.filter(e => e.visible && e.opacity > 0.5);
+      if (ae.length && Math.random() < 0.045) {
+        const e = ae[Math.random() * ae.length | 0];
+        pulses.push({ edge: e, t: 0, speed: 0.005 + Math.random() * 0.008 });
+      }
+      pulses.forEach(p => p.t += p.speed * dt);
+      pulses = pulses.filter(p => p.t < 1);
+
+      // Shooting stars
+      if (Math.random() < 0.005) {
+        const sx = Math.random() * W, sy = Math.random() * H * 0.4;
+        shootingStars.push({ x: sx, y: sy, vx: 3 + Math.random() * 4, vy: 1 + Math.random() * 2, life: 1 });
+      }
+      shootingStars.forEach(ss => { ss.x += ss.vx; ss.y += ss.vy; ss.life -= 0.015 });
+      shootingStars = shootingStars.filter(ss => ss.life > 0);
+
+      // HUD
+      const vis = nodes.filter(n => n.visible).length;
+      const vedge = edges.filter(e => e.visible).length;
+      document.getElementById('stats').textContent = `${vis} nodes · ${vedge} edges`;
+      const d = new Date();
+      document.getElementById('clock').textContent = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + ' ' + d.toLocaleTimeString();
+
+      render(ts);
+      requestAnimationFrame(loop);
+    }
+
+    // ── SSE connection ────────────────────────────────────────────────────────────
+    let _evtSource = null;
+
+    function connectSSE() {
+      if (_evtSource) { _evtSource.close(); _evtSource = null; }
+      _evtSource = new EventSource('/events');
+
+      _evtSource.addEventListener('node', e => {
+        const d = JSON.parse(e.data);
+        if (d.id === 'prompt' && !GOAL_TEXT) {
+          GOAL_TEXT = d.label;
+          document.getElementById('typed').textContent = GOAL_TEXT;
+        }
+        addLiveNode(d, performance.now());
+      });
+
+      _evtSource.addEventListener('edge', e => {
+        const d = JSON.parse(e.data);
+        addLiveEdge(d.source, d.target, d.color, d.width, performance.now());
+      });
+
+      _evtSource.addEventListener('phase', e => {
+        const d = JSON.parse(e.data);
+        document.getElementById('phase').textContent = d.text;
+      });
+
+      _evtSource.addEventListener('status', e => {
+        const d = JSON.parse(e.data);
+        const n = nodeMap[d.id];
+        if (!n) return;
+        const c = _statusColors[d.status];
+        if (c) n.color = c;
+      });
+
+      _evtSource.addEventListener('node_detail', e => {
+        const d = JSON.parse(e.data);
+        const n = nodeMap[d.id];
+        if (!n) return;
+        n.tools_detail = d.tools;
+        n.endpoint = d.endpoint;
+        // Refresh panel if this node is already open
+        if (selectedNode === n) showDetailPanel(n);
+      });
+
+      _evtSource.addEventListener('done', () => {
+        _evtSource.close();
+        _evtSource = null;
+      });
+    }
+
+    document.getElementById('replay-btn').addEventListener('click', () => {
+      startAnimation();
+      connectSSE();
+    });
+    startAnimation();
+    requestAnimationFrame(loop);
+    connectSSE();
+  </script>
+</body>
+
+</html>

@@ -8,12 +8,16 @@ Usage:
 How it works:
     1. Claude breaks your goal into several specific MCP server descriptions.
     2. Each description is sent to a Modal worker in parallel.
-    3. Every worker calls Claude to generate a complete, ready-to-deploy MCP server.
-    4. Files are saved to ./generated_mcps/ as  1_<slug>_mcp.py, 2_<slug>_mcp.py, …
-    5. Each file is deployed with `modal deploy`.
+    3. Every worker calls Claude to generate a complete MCP server AND its test script.
+    4. Each server is deployed with `modal deploy`, then its tests are run locally.
+    5. An LLM interprets the test results:
+         - "valid"     → keep the deployment, save the file.
+         - "transient" → external failure (API down, rate-limited); skip without retry.
+         - "code_bug"  → stop the app, adjust the prompt, retry (up to MAX_DEPLOY_ATTEMPTS).
+    6. After MAX_DEPLOY_ATTEMPTS failures the server is skipped entirely.
 
 Prerequisites:
-    - ANTHROPIC_API_KEY set locally (for the planning step).
+    - ANTHROPIC_API_KEY set locally (for planning and interpretation steps).
     - A Modal secret named "anthropic-secret" with ANTHROPIC_API_KEY
       (for the parallel generation workers).
       Create it once with:
@@ -26,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import anthropic
@@ -35,19 +40,108 @@ import os
 
 dotenv.load_dotenv()
 
+# ── Live visualization (optional) ─────────────────────────────────────────────
+try:
+    from viz_server import start_viz_server, emit as viz_emit
+    HAS_VIZ = True
+except ImportError:
+    HAS_VIZ = False
+    def viz_emit(event_type: str, data: dict) -> None: pass      # noqa: E704
+    def start_viz_server(port: int = 8765, open_browser: bool = True) -> None: pass  # noqa: E704
+
+# ── Terminal styling ───────────────────────────────────────────────────────────
+_R   = "\033[0m"   # reset
+_B   = "\033[1m"   # bold
+_DIM = "\033[2m"   # dim
+_C   = "\033[96m"  # bright cyan
+_G   = "\033[92m"  # bright green
+_Y   = "\033[93m"  # bright yellow
+_RE  = "\033[91m"  # bright red
+_BL  = "\033[94m"  # bright blue
+_M   = "\033[95m"  # bright magenta
+
+def _sec(title: str) -> str:
+    """Styled section header."""
+    bar = "─" * (50 - len(title) - 1)
+    return f"\n{_C}{_B}◆ {title}{_R}{_DIM} {bar}{_R}"
+
+def _mcp_header(idx: int, total: int, slug: str) -> str:
+    """Styled per-MCP box header."""
+    label = f"  [{idx}/{total}]  {slug}"
+    pad   = 50 - len(label)
+    return (
+        f"\n{_BL}┌{'─' * 52}┐\n"
+        f"│{_B}{label}{_R}{_BL}{' ' * pad}│\n"
+        f"└{'─' * 52}┘{_R}"
+    )
+
+# ── Public-APIs fallback reference ─────────────────────────────────────────────
+try:
+    from api_reference import (
+        get_best_apis, format_api_context,
+        scrape_docs_for_apis, format_api_context_with_docs,
+    )
+    HAS_API_REFERENCE = True
+except ImportError:
+    HAS_API_REFERENCE = False
+
+# ── Confidence assessment (same heuristics as mcp_builder) ─────────────────────
+
+_SUSPICIOUS_DOMAINS = ["example.com", "fakeapi", "placeholder", "dummyapi", "mockapi"]
+
+def extract_tool_names(code: str) -> list[str]:
+    """Extract @mcp.tool() function names from generated MCP code."""
+    matches = re.findall(r'@mcp\.tool\(\)\s*\n\s*(?:async\s+)?def\s+(\w+)', code)
+    return matches
+
+
+def _fetch_tool_list(endpoint_url: str) -> list[dict]:
+    """Call tools/list on a live MCP server. Returns [] on any error."""
+    import requests
+    try:
+        resp = requests.post(
+            f"{endpoint_url}/mcp/",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        text = resp.text.strip()
+        # Response may be SSE ("data: {...}") or plain JSON
+        for line in text.splitlines():
+            if line.startswith("data: "):
+                return json.loads(line[6:]).get("result", {}).get("tools", [])
+        return json.loads(text).get("result", {}).get("tools", [])
+    except Exception:
+        return []
+
+
+def _assess_confidence(code: str) -> dict:
+    """Quick confidence check on generated code (runs locally, no LLM)."""
+    import re
+    score, reasons = 1.0, []
+    if not valid_syntax(code):
+        score -= 0.5; reasons.append("syntax errors")
+    if not any(re.search(p, code) for p in [r"requests\.(get|post|put|patch|delete)", r"httpx\.", r"aiohttp\."]):
+        score -= 0.3; reasons.append("no API calls")
+    if any(d in code.lower() for d in _SUSPICIOUS_DOMAINS):
+        score -= 0.4; reasons.append("suspicious URLs")
+    return {"confident": score >= 0.7 and len(reasons) == 0, "score": max(0.0, score), "reasons": reasons}
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER","openai").lower()
+# LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+LLM_PROVIDER = "anthropic"
 if LLM_PROVIDER not in ("anthropic", "openai"):
     print(f"Error: LLM_PROVIDER must be 'anthropic' or 'openai', got '{LLM_PROVIDER}'", file=sys.stderr)
     sys.exit(1)
-print(f"Using LLM Provider: {LLM_PROVIDER}")
+print(f"{_DIM}  provider · {LLM_PROVIDER}{_R}")
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-HERE         = Path(__file__).parent
+HERE          = Path(__file__).parent
 TEMPLATE_FILE = HERE / "mcp_template.py"
-OUTPUT_DIR   = HERE / "generated_mcps"
+OUTPUT_DIR    = HERE / "generated_mcps"
 
 # ── Modal image & app ──────────────────────────────────────────────────────────
 
@@ -70,15 +164,17 @@ PLANNER_SYSTEM = """You are an expert at decomposing a high-level user goal into
 Given a goal, output a JSON array.  Each element is an object with exactly two keys:
   "slug"   — a short snake_case identifier for the server (e.g. "weather", "flight_search")
   "prompt" — a detailed, specific prompt (3-5 sentences) describing what that MCP server
-             should do and which tools it needs.  The prompt will be fed directly to an
+             should do and which tools it needs. The prompt will be fed directly to an
              MCP code-generation AI, so be precise about tool names, parameters, return
-             values, and which public APIs to use (prefer free, key-less APIs where possible).
+             values, and which public APIs to use.
 
 Rules:
+-  ██ API KEY RULE — this is the most important rule after rule 1 ██ ALWAYS use free, public APIs that require NO API key unless the prompt explicitly says an API key is available or tells you to use a specific authenticated service.
 - Output ONLY valid JSON — no markdown fences, no commentary.
 - Produce between 2 and 6 servers; pick the most impactful ones for the goal.
 - Each server should have a single, coherent responsibility.
 - Do not repeat functionality across servers.
+- ALWAYS specify a concrete, real public API for each server to use. Do NOT leave the API choice vague.
 """
 
 def plan_tools(goal: str) -> list[dict]:
@@ -86,14 +182,6 @@ def plan_tools(goal: str) -> list[dict]:
     Ask Claude to decompose a high-level goal into [{slug, prompt}, …].
     Runs locally before any Modal work begins.
     """
-    # client = anthropic.Anthropic()
-    # message = client.messages.create(
-    #     model="claude-opus-4-6",
-    #     max_tokens=2048,
-    #     system=PLANNER_SYSTEM,
-    #     messages=[{"role": "user", "content": f"Goal: {goal}"}],
-    # )
-    # raw = message.content[0].text.strip()
     if LLM_PROVIDER == "anthropic":
         client = anthropic.Anthropic()
         message = client.messages.create(
@@ -115,10 +203,31 @@ def plan_tools(goal: str) -> list[dict]:
             ],
         )
         raw = message.choices[0].message.content.strip()
+
+    # ── Robustly parse JSON from the LLM output ──────────────────────────
+    # Strip markdown code fences
     if raw.startswith("```"):
         raw = re.sub(r"^```[^\n]*\n", "", raw)
         raw = re.sub(r"\n```\s*$", "", raw)
-    return json.loads(raw)
+
+    # Extract just the JSON array if there's extra text around it
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if match:
+        raw = match.group(0)
+
+    # Remove trailing commas before ] or } (common LLM mistake)
+    raw = re.sub(r",\s*([}\]])", r"\1", raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"\n✗ LLM returned invalid JSON. Error: {e}")
+        print(f"\n--- RAW LLM RESPONSE ---")
+        print(raw[:2000])
+        if len(raw) > 2000:
+            print(f"\n... (truncated, total length: {len(raw)} chars)")
+        print(f"--- END RAW RESPONSE ---\n")
+        raise
 
 
 # ── Modal worker (runs in parallel on Modal) ───────────────────────────────────
@@ -128,21 +237,26 @@ def plan_tools(goal: str) -> list[dict]:
     secrets=secrets_list,
     timeout=300,
 )
-def build_one_mcp(prompt: str, template: str) -> str:
+def build_mcp_and_tests(prompt: str, template: str, api_context: str = "") -> tuple[str, str]:
     """
-    Runs on a Modal worker.  Generates one complete MCP server and returns its source.
+    Runs on a Modal worker. Generates one complete MCP server and its test script.
+    If api_context is provided, it is injected into the system prompt so the LLM
+    uses real, curated APIs from the public-apis reference instead of hallucinating.
+    Returns (mcp_code, test_code).
     """
     import sys
     import os
     sys.path.insert(0, "/root")
     os.environ["LLM_PROVIDER"] = LLM_PROVIDER
-    from mcp_builder import generate  # noqa: PLC0415
-    return generate(prompt, template)
+    from mcp_builder import generate, generate_tests  # noqa: PLC0415
+    code = generate(prompt, template, api_context=api_context if api_context else None)
+    test_code = generate_tests(code)
+    return code, test_code
 
 
-# ── Syntax validation (runs locally) ──────────────────────────────────────────
+# ── Syntax validation ──────────────────────────────────────────────────────────
 
-MAX_RETRIES = 2
+MAX_RETRIES = 2  # syntax-error retry passes before the deploy loop
 
 def valid_syntax(code: str) -> bool:
     try:
@@ -184,103 +298,486 @@ def make_room_for(n: int) -> None:
         return
 
     to_stop = deployed[:excess]
-    print(f"\n  At the {ENDPOINT_LIMIT}-endpoint limit. "
-          f"Stopping {len(to_stop)} oldest app(s) to make room:")
-    for app in to_stop:
-        name = app.get("Description", app.get("App ID", "?"))
-        app_id = app.get("App ID", "")
-        print(f"    Stopping: {name} ({app_id})")
+    print(f"\n{_Y}  ⚠  endpoint limit reached ({ENDPOINT_LIMIT} max) — "
+          f"stopping {len(to_stop)} oldest app(s){_R}")
+    for a in to_stop:
+        name = a.get("Description", a.get("App ID", "?"))
+        app_id = a.get("App ID", "")
+        print(f"  {_DIM}  ↓ {name} ({app_id}){_R}")
         subprocess.run(["modal", "app", "stop", app_id], check=False)
 
 
 # ── Deploy helper (runs locally) ───────────────────────────────────────────────
 
-def deploy_file(filepath: Path) -> bool:
+def deploy_file(filepath: Path) -> tuple[bool, str | None]:
+    """Deploy a file with `modal deploy`. Returns (success, endpoint_url)."""
     if not shutil.which("modal"):
-        print(f"    [!] `modal` CLI not found — skipping deploy of {filepath.name}")
+        print(f"  {_RE}  ✗  modal CLI not found — skipping {filepath.name}{_R}")
+        return False, None
+    print(f"  {_DIM}  deploying {filepath.name} …{_R}")
+    result = subprocess.run(
+        ["modal", "deploy", str(filepath)],
+        capture_output=True, text=True,
+    )
+    output = result.stdout + result.stderr
+    print(_DIM + output + _R)
+    url = None
+    if result.returncode == 0:
+        # Modal wraps long lines in its output; collapse continuation lines before matching
+        collapsed = re.sub(r"\n[ \t]+", "", output)
+        match = re.search(r"https://[a-z0-9-]+--[a-z0-9-]+-web\.modal\.run", collapsed)
+        if match:
+            url = match.group(0)
+    return result.returncode == 0, url
+
+
+# ── App name helpers (runs locally) ────────────────────────────────────────────
+
+def extract_app_name(code: str) -> str | None:
+    """Extract the modal.App name from generated source code."""
+    match = re.search(r'modal\.App\(["\']([^"\']+)["\']', code)
+    return match.group(1) if match else None
+
+
+def stop_app_by_name(app_name: str) -> None:
+    """Look up a deployed app by name and stop it."""
+    for a in _deployed_apps():
+        if a.get("Description", "") == app_name:
+            app_id = a.get("App ID", "")
+            if app_id:
+                print(f"  {_DIM}  ↓ stopping {app_name} ({app_id}){_R}")
+                subprocess.run(["modal", "app", "stop", app_id], check=False)
+                return
+    print(f"  {_Y}  ⚠  could not find '{app_name}' to stop{_R}")
+
+
+# ── Test runner (runs locally) ─────────────────────────────────────────────────
+
+def run_tests_locally(endpoint_url: str, test_code: str) -> str:
+    """Write test_code to a temp file, run it with the endpoint URL, return output."""
+    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
+        f.write(test_code)
+        test_file = Path(f.name)
+    try:
+        result = subprocess.run(
+            [sys.executable, str(test_file), endpoint_url],
+            capture_output=True, text=True, timeout=60,
+        )
+        output = result.stdout
+        if result.stderr:
+            output += f"\nSTDERR:\n{result.stderr}"
+        return output
+    except subprocess.TimeoutExpired:
+        return "Tests timed out after 60 seconds."
+    finally:
+        test_file.unlink(missing_ok=True)
+
+
+# ── Registry registration (runs locally) ───────────────────────────────────────
+
+REGISTRY_NAME = "mcp-tool-registry"
+
+def _extract_app_name_from_file(filepath: Path) -> str | None:
+    """Extract the Modal app name from a generated MCP file."""
+    content = filepath.read_text()
+    # Match the actual app definition, not comments
+    # Look for: app = modal.App("name")
+    match = re.search(r'^app\s*=\s*modal\.App\(["\']([^"\']+)["\']\)', content, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def get_modal_workspace() -> str | None:
+    """Get the current Modal workspace name."""
+    try:
+        result = subprocess.run(
+            ["modal", "profile", "current"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"    [!] modal profile current failed: {result.stderr}")
+            return None
+        
+        # The output is just the workspace name (e.g., "kevinzhou168")
+        workspace = result.stdout.strip()
+        if workspace:
+            print(f"    → Detected workspace: {workspace}")
+            return workspace
+        
+        print(f"    [!] modal profile current returned empty output")
+        return None
+    except Exception as e:
+        print(f"    [!] Error getting workspace: {e}")
+        return None
+
+
+def register_mcp_in_registry(filepath: Path, workspace: str) -> bool:
+    """
+    Register a deployed MCP in the Modal.Dict registry.
+    
+    Args:
+        filepath: Path to the deployed MCP file.
+        workspace: Modal workspace name.
+        
+    Returns:
+        True if registration succeeded, False otherwise.
+    """
+    try:
+        app_name = _extract_app_name_from_file(filepath)
+        if not app_name:
+            print(f"      [!] Could not extract app name from {filepath.name}")
+            return False
+        
+        # Construct endpoint URL
+        url = f"https://{workspace}--{app_name}-web.modal.run"
+        
+        print(f"      → Registering {app_name} at {url}")
+        
+        # Register in Modal.Dict
+        registry = modal.Dict.from_name(REGISTRY_NAME, create_if_missing=True)
+        registry[app_name] = url
+        
+        print(f"      ✓ Registered in registry: {app_name}")
+        return True
+    
+    except Exception as e:
+        import traceback
+        print(f"      [!] Registry error: {e}")
+        print(f"      [!] Traceback: {traceback.format_exc()}")
         return False
-    print(f"    Deploying {filepath.name} …")
-    result = subprocess.run(["modal", "deploy", str(filepath)])
-    return result.returncode == 0
 
 
 # ── Entrypoint ─────────────────────────────────────────────────────────────────
 
+MAX_DEPLOY_ATTEMPTS = 2  # 1 retry per MCP (attempt 1 + attempt 2)
+
 @app.local_entrypoint()
 def main(goal: str = ""):
+    # ── Viz node layout constants ───────────────────────────────────────────────
+    _VIZ_PLANET_TYPES = ['mars', 'earth', 'venus', 'neptune', 'mercury', 'uranus']
+    _VIZ_AGENT_COLORS = ['#c1440e', '#4488cc', '#d4a84b', '#4466aa', '#8a8a8a', '#88ccdd']
+    _VIZ_SRV_PLANETS  = ['uranus', 'neptune', 'earth', 'jupiter', 'mars', 'saturn']
+    _VIZ_SRV_COLORS   = ['#88ccdd', '#4361ee', '#4488cc', '#C88B3A', '#c1440e', '#7b2cbf']
+
     # ── 1. Get goal ────────────────────────────────────────────────────────────
+    print(f"\n{_C}{_B}╔══════════════════════════════════════════════════╗{_R}")
+    print(f"{_C}{_B}║  ⚡  APOLLO  ·  MCP Server Factory               ║{_R}")
+    print(f"{_C}{_B}╚══════════════════════════════════════════════════╝{_R}")
+    start_viz_server(port=8765)
     if not goal:
-        print("Describe your high-level goal (e.g. 'plan a trip to spain'):")
-        goal = input("Goal: ").strip()
+        print(f"\n{_B}  Describe your goal{_R} {_DIM}(e.g. 'plan a trip to spain'){_R}")
+        goal = input(f"{_C}  › {_R}").strip()
     if not goal:
-        print("No goal provided.", file=sys.stderr)
+        print(f"{_RE}  ✗  no goal provided{_R}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\n Goal: {goal}")
+    print(f"\n  {_B}goal{_R}  {goal}")
+    viz_emit("phase", {"text": f"Goal: {goal}"})
+    viz_emit("node", {
+        "id": "prompt", "label": goal, "bt": "sun",
+        "color": "#FDB813", "r": 32, "ix": 0, "iy": -240,
+        "desc": "User prompt — the high-level goal",
+        "info": goal,
+    })
+    viz_emit("phase", {"text": "Planning MCP servers…"})
 
     # ── 2. Plan tools ──────────────────────────────────────────────────────────
-    print("\n Planning MCP servers …")
+    print(_sec("PLANNING"))
+    print(f"  decomposing goal into MCP servers…")
     tools = plan_tools(goal)
+    N = len(tools)
 
-    print(f"\n Will build {len(tools)} MCP server(s):")
+    print(f"\n  {_B}{len(tools)} server(s){_R} to build:")
     for i, t in enumerate(tools, 1):
-        print(f"   {i}. {t['slug']}")
-        print(f"      {t['prompt'][:120]}{'…' if len(t['prompt']) > 120 else ''}")
+        print(f"  {_C}  {i}{_R}  {_B}{t['slug']}{_R}")
+        print(f"  {_DIM}     {t['prompt'][:120]}{'…' if len(t['prompt']) > 120 else ''}{_R}")
 
-    # ── 3. Load template once; pass to all workers ─────────────────────────────
+    # Emit supervisor, builder, and agent nodes
+    viz_emit("node", {
+        "id": "supervisor", "label": "Supervisor", "bt": "planet", "pt": "saturn",
+        "color": "#f0a500", "r": 26, "ix": 0, "iy": -160,
+        "desc": "Orchestrates the pipeline and decomposes the goal",
+        "info": "Calls plan_tools() to decompose the goal into MCP server specs.",
+    })
+    viz_emit("edge", {"source": "prompt", "target": "supervisor", "color": "#d4a53c", "width": 3})
+    viz_emit("node", {
+        "id": "builder", "label": "Tool Builder", "bt": "planet", "pt": "jupiter",
+        "color": "#4A9EFF", "r": 24, "ix": 0, "iy": -80,
+        "desc": "Generates MCP server code in parallel on Modal Cloud",
+        "info": "Dispatches parallel code generation tasks to Modal Cloud workers.",
+    })
+    viz_emit("edge", {"source": "supervisor", "target": "builder", "color": "#d4a53c", "width": 2.5})
+    for i, t in enumerate(tools):
+        slug = t["slug"]
+        ix   = (i - N / 2 + 0.5) * 160
+        viz_emit("node", {
+            "id": f"agent_{slug}", "label": f"MCP Builder {i + 1}", "bt": "planet",
+            "pt": _VIZ_PLANET_TYPES[i % len(_VIZ_PLANET_TYPES)],
+            "color": _VIZ_AGENT_COLORS[i % len(_VIZ_AGENT_COLORS)],
+            "r": 15, "ix": ix, "iy": 20,
+            "desc": f"Builds {slug} server",
+            "info": t["prompt"][:200],
+        })
+        viz_emit("edge", {"source": "builder", "target": f"agent_{slug}", "color": "#d4a53c", "width": 1.8})
+
+    # ── 3. Load template once ──────────────────────────────────────────────────
     if not TEMPLATE_FILE.exists():
         print(f"Error: template not found at {TEMPLATE_FILE}", file=sys.stderr)
         sys.exit(1)
     template = TEMPLATE_FILE.read_text()
 
-    # ── 4. Generate in parallel on Modal (with syntax-error retry) ────────────
-    print(f"\n Generating {len(tools)} MCP server(s) in parallel on Modal …")
-    args = [(t["prompt"], template) for t in tools]
-    generated_codes = list(build_one_mcp.starmap(args))
+    # ── 3b. Resolve curated API candidates for each tool ──────────────────────
+    api_contexts: list[str] = []
+    if HAS_API_REFERENCE:
+        print(_sec("API LOOKUP"))
+        for t in tools:
+            candidates = get_best_apis(t["prompt"], top_n=5)
+            if candidates:
+                ctx = format_api_context(candidates)
+                api_contexts.append(ctx)
+                names = ", ".join(c["name"] for c in candidates[:3])
+                print(f"  {_BL}  {t['slug']}{_R}  {_DIM}→  {len(candidates)} API(s)  ·  {names}{_R}")
+            else:
+                api_contexts.append("")
+                print(f"  {_DIM}  {t['slug']}  →  no curated APIs found, using LLM knowledge{_R}")
+    else:
+        print(f"\n{_Y}  ⚠  api_reference not available — using LLM knowledge only{_R}")
+        api_contexts = [""] * len(tools)
 
+    # ── 4. Generate code + tests in parallel on Modal ─────────────────────────
+    print(_sec("GENERATING"))
+    print(f"  spinning up {_B}{len(tools)}{_R} Modal workers  {_DIM}(code + tests in parallel)…{_R}")
+    viz_emit("phase", {"text": "Generating code on Modal…"})
+    for t in tools:
+        viz_emit("status", {"id": f"agent_{t['slug']}", "status": "building"})
+    args = [(t["prompt"], template, ctx) for t, ctx in zip(tools, api_contexts)]
+    generated = list(build_mcp_and_tests.starmap(args))  # list of (code, test_code)
+
+    # Emit server nodes now that we have generated code
+    for i, (t, (code, _)) in enumerate(zip(tools, generated)):
+        slug = t["slug"]
+        ix   = (i - N / 2 + 0.5) * 160
+        viz_emit("node", {
+            "id": f"srv_{slug}", "label": f"{slug}_mcp", "bt": "planet",
+            "pt": _VIZ_SRV_PLANETS[i % len(_VIZ_SRV_PLANETS)],
+            "color": _VIZ_SRV_COLORS[i % len(_VIZ_SRV_COLORS)],
+            "r": 17, "ix": ix, "iy": 120,
+            "desc": f"{slug} MCP server",
+            "info": f"Generated MCP server for {slug}.",
+        })
+        viz_emit("edge", {"source": f"agent_{slug}", "target": f"srv_{slug}", "color": "#7b2cbf", "width": 1.5})
+        viz_emit("status", {"id": f"agent_{slug}", "status": "deployed"})
+
+        # Emit a tiny moon node for each tool function inside the MCP
+        tool_names = extract_tool_names(code)
+        n_tools = len(tool_names)
+        for j, tool_name in enumerate(tool_names):
+            tool_ix = ix + (j - n_tools / 2 + 0.5) * 38
+            viz_emit("node", {
+                "id": f"tool_{slug}_{tool_name}",
+                "label": tool_name,
+                "bt": "tool_moon",
+                "color": "#8d99ae",
+                "r": 8, "ix": tool_ix, "iy": 178,
+                "desc": f"Tool in {slug}_mcp",
+                "info": f"@mcp.tool() function: {tool_name}",
+            })
+            viz_emit("edge", {
+                "source": f"srv_{slug}", "target": f"tool_{slug}_{tool_name}",
+                "color": "#8d99ae", "width": 0.7,
+            })
+
+    # ── 5. Batch syntax check + retry (fast pre-check before deploying) ────────
+    print(_sec("SYNTAX CHECK"))
+    viz_emit("phase", {"text": "Checking syntax…"})
     for attempt in range(1, MAX_RETRIES + 1):
-        bad = [i for i, code in enumerate(generated_codes) if not valid_syntax(code)]
+        bad = [i for i, (code, _) in enumerate(generated) if not valid_syntax(code)]
         if not bad:
             break
-        print(f"\n  {len(bad)} server(s) had syntax errors — retrying (attempt {attempt}/{MAX_RETRIES}) …")
-        retry_results = list(build_one_mcp.starmap([args[i] for i in bad]))
-        for i, code in zip(bad, retry_results):
-            generated_codes[i] = code
+        print(f"  {_Y}  ⚠  {len(bad)} server(s) had syntax errors — "
+              f"retrying (pass {attempt}/{MAX_RETRIES})…{_R}")
+        retry_results = list(build_mcp_and_tests.starmap([args[i] for i in bad]))
+        for i, result in zip(bad, retry_results):
+            generated[i] = result
 
-    # report any that still fail after all retries
-    still_bad = [i for i, code in enumerate(generated_codes) if not valid_syntax(code)]
+    # report any still failing after all retries
+    still_bad = [i for i, (code, _) in enumerate(generated) if not valid_syntax(code)]
     if still_bad:
-        print(f"\n  WARNING: {len(still_bad)} server(s) still have syntax errors after retries:")
+        print(f"  {_RE}  ✗  {len(still_bad)} server(s) still failing after retries:{_R}")
         for i in still_bad:
-            print(f"    - {tools[i]['slug']}")
+            slug = tools[i]['slug']
+            ix   = (i - N / 2 + 0.5) * 160
+            print(f"  {_DIM}    · {slug}{_R}")
+            viz_emit("node", {
+                "id": f"v_{slug}_syntax", "label": "Syntax Error", "bt": "comet",
+                "color": "#00E5FF", "r": 13, "ix": ix, "iy": 220,
+                "desc": "ast.parse() — syntax validation failed",
+                "info": f"Syntax error in {slug} after {MAX_RETRIES} retries.",
+            })
+            viz_emit("edge", {"source": f"srv_{slug}", "target": f"v_{slug}_syntax", "color": "#00E5FF", "width": 0.8})
+            viz_emit("status", {"id": f"v_{slug}_syntax", "status": "failed"})
+            viz_emit("status", {"id": f"srv_{slug}", "status": "failed"})
+    else:
+        print(f"  {_G}  ✓  all {len(generated)} servers passed{_R}")
 
-    # ── 5. Save files ──────────────────────────────────────────────────────────
+    # ── 6. Per-MCP: deploy → test → interpret → retry ─────────────────────────
     OUTPUT_DIR.mkdir(exist_ok=True)
-    saved_files: list[Path] = []
+    make_room_for(len(tools))
 
-    print(f"\n Saving to {OUTPUT_DIR}/")
-    for i, (tool, code) in enumerate(zip(tools, generated_codes), 1):
-        filename = f"{i}_{tool['slug']}_mcp.py"
-        filepath = OUTPUT_DIR / filename
-        filepath.write_text(code)
-        saved_files.append(filepath)
-        lines = len(code.splitlines())
-        print(f"   Saved: {filename}  ({lines} lines)")
+    from mcp_builder import interpret_results  # runs locally
 
-    # ── 6. Deploy all (stop oldest apps if at endpoint limit) ─────────────────
-    make_room_for(len(saved_files))
-    print(f"\n Deploying all servers …")
-    results: list[tuple[str, bool]] = []
-    for filepath in saved_files:
-        ok = deploy_file(filepath)
-        results.append((filepath.name, ok))
+    workspace = get_modal_workspace()
+    if not workspace:
+        print(f"  {_Y}  ⚠  could not detect Modal workspace — registry skipped{_R}")
+
+    summary: list[tuple[str, str, bool]] = []
+
+    for idx, (tool, (code, test_code)) in enumerate(zip(tools, generated), 1):
+        slug      = tool["slug"]
+        prompt    = tool["prompt"]
+        filename  = f"{idx}_{slug}_mcp.py"
+        filepath  = OUTPUT_DIR / filename
+
+        print(_mcp_header(idx, len(tools), slug))
+
+        i          = idx - 1
+        agent_ix   = (i - N / 2 + 0.5) * 160
+
+        current_code   = code
+        current_tests  = test_code
+        current_prompt = prompt
+        final_status   = None
+        registered     = False
+
+        viz_emit("phase", {"text": f"Deploying {slug}…"})
+        # Create deploy validation node upfront (JS skips duplicates)
+        viz_emit("node", {
+            "id": f"v_{slug}_deploy", "label": "Deploy", "bt": "comet",
+            "color": "#00E5FF", "r": 13, "ix": agent_ix - 20, "iy": 220,
+            "desc": f"modal deploy — {slug}",
+            "info": f"Deploying {slug} MCP server to Modal.",
+        })
+        viz_emit("edge", {"source": f"srv_{slug}", "target": f"v_{slug}_deploy", "color": "#00E5FF", "width": 0.8})
+
+        for attempt in range(1, MAX_DEPLOY_ATTEMPTS + 1):
+            print(f"\n  {_DIM}  ↳ attempt {attempt}/{MAX_DEPLOY_ATTEMPTS}{_R}")
+
+            # Syntax guard on retried code
+            if not valid_syntax(current_code):
+                print(f"  {_RE}    ✗  syntax error — cannot deploy{_R}")
+                if attempt < MAX_DEPLOY_ATTEMPTS:
+                    print(f"  {_Y}    ↺  regenerating…{_R}")
+                    current_code, current_tests = build_mcp_and_tests.remote(
+                        current_prompt, template
+                    )
+                    continue
+                viz_emit("status", {"id": f"v_{slug}_deploy", "status": "failed"})
+                final_status = "skipped (failed after retries)"
+                break
+
+            filepath.write_text(current_code)
+            ok, endpoint_url = deploy_file(filepath)
+
+            if not ok or not endpoint_url:
+                print(f"  {_RE}    ✗  deploy failed{_R}")
+                viz_emit("status", {"id": f"v_{slug}_deploy", "status": "failed"})
+                if attempt < MAX_DEPLOY_ATTEMPTS:
+                    continue
+                final_status = "skipped (failed after retries)"
+                break
+
+            print(f"  {_BL}    ⬡  endpoint  {endpoint_url}{_R}")
+            print(f"  {_DIM}    running tests…{_R}")
+
+            viz_emit("phase", {"text": f"Testing {slug}…"})
+            # Create test validation node (JS skips duplicates)
+            viz_emit("node", {
+                "id": f"v_{slug}_test", "label": "Tests", "bt": "comet",
+                "color": "#00E5FF", "r": 13, "ix": agent_ix + 20, "iy": 220,
+                "desc": f"Integration tests — {slug}",
+                "info": f"Running integration tests for {slug} MCP server.",
+            })
+            viz_emit("edge", {"source": f"srv_{slug}", "target": f"v_{slug}_test", "color": "#00E5FF", "width": 0.8})
+
+            test_output = run_tests_locally(endpoint_url, current_tests)
+            preview = test_output[:600] + ("…" if len(test_output) > 600 else "")
+            print(f"{_DIM}{preview}{_R}")
+
+            print(f"  {_DIM}    interpreting results…{_R}")
+            interpretation = interpret_results(test_output, current_code, current_prompt)
+            verdict  = interpretation.get("verdict", "code_bug")
+            reason   = interpretation.get("reason", "")
+
+            if verdict == "valid":
+                print(f"  {_G}    ✓  valid{_R}  {_DIM}─  {reason}{_R}")
+                viz_emit("status", {"id": f"v_{slug}_deploy", "status": "deployed"})
+                viz_emit("status", {"id": f"v_{slug}_test",   "status": "deployed"})
+                viz_emit("status", {"id": f"srv_{slug}",      "status": "deployed"})
+                # Fetch live tool list and send to the visualizer for the detail panel
+                live_tools = _fetch_tool_list(endpoint_url)
+                if live_tools:
+                    viz_emit("node_detail", {
+                        "id": f"srv_{slug}",
+                        "endpoint": endpoint_url,
+                        "tools": live_tools,
+                    })
+                if workspace:
+                    registered = register_mcp_in_registry(filepath, workspace)
+                final_status = "deployed"
+                break
+            elif verdict == "transient":
+                print(f"  {_Y}    ⚠  transient{_R}  {_DIM}─  {reason}{_R}")
+                viz_emit("status", {"id": f"v_{slug}_test", "status": "failed"})
+                viz_emit("status", {"id": f"srv_{slug}",    "status": "skipped"})
+            else:
+                print(f"  {_RE}    ✗  code_bug{_R}  {_DIM}─  {reason}{_R}")
+                viz_emit("status", {"id": f"v_{slug}_deploy", "status": "failed"})
+                viz_emit("status", {"id": f"v_{slug}_test",   "status": "failed"})
+
+            # Not valid — tear down the app before deciding what to do
+            app_name = extract_app_name(current_code)
+            if app_name:
+                stop_app_by_name(app_name)
+            filepath.unlink(missing_ok=True)
+
+            if verdict == "transient":
+                final_status = "skipped (external failure)"
+                break
+
+            # code_bug
+            if attempt < MAX_DEPLOY_ATTEMPTS:
+                adjusted = interpretation.get("adjusted_prompt") or current_prompt
+                print(f"  {_Y}    ↺  regenerating with adjusted prompt…{_R}")
+                current_code, current_tests = build_mcp_and_tests.remote(
+                    adjusted, template
+                )
+                current_prompt = adjusted
+            else:
+                viz_emit("status", {"id": f"srv_{slug}", "status": "failed"})
+                final_status = "skipped (failed after retries)"
+
+        if final_status is None:
+            viz_emit("status", {"id": f"srv_{slug}", "status": "failed"})
+            final_status = "skipped (failed after retries)"
+
+        summary.append((slug, final_status, registered))
 
     # ── 7. Summary ─────────────────────────────────────────────────────────────
-    print("\n" + "━" * 56)
-    print("  Summary")
-    print("━" * 56)
-    for name, ok in results:
-        status = "deployed" if ok else "FAILED  "
-        print(f"  [{status}] {name}")
-    print("━" * 56)
-    print(f"\n  Generated files: {OUTPUT_DIR}/")
+    print(f"\n{_C}{_B}{'━' * 54}{_R}")
+    print(f"{_C}{_B}  RESULTS  ·  {len(summary)} servers processed{_R}")
+    print(f"{_C}{_B}{'━' * 54}{_R}")
+    for name, status, reg in summary:
+        if status == "deployed":
+            icon, col = "✓", _G
+        elif "external" in status:
+            icon, col = "⚠", _Y
+        else:
+            icon, col = "✗", _RE
+        label = status.replace("skipped (", "").rstrip(")")
+        reg_tag = f"  {_G}[✓ reg]{_R}" if reg else f"  {_DIM}[✗ reg]{_R}"
+        print(f"  {col}{_B}{icon}{_R}  {_B}{name}{_R}  {_DIM}{label}{_R}{reg_tag}")
+    print(f"{_C}{_B}{'━' * 54}{_R}")
+    print(f"\n  {_DIM}files saved to  {OUTPUT_DIR}/{_R}")
+
+    viz_emit("phase", {"text": "Pipeline complete ✓"})
+    viz_emit("done", {})

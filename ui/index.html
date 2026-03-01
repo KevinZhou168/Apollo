@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Apollo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #07071a;
+      color: #dde1f5;
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px 64px;
+      overflow-x: hidden;
+    }
+
+    /* ── stars ── */
+    #stars {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── layout ── */
+    .container {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 760px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* ── header ── */
+    header { text-align: center; }
+
+    header h1 {
+      font-size: 3rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      background: linear-gradient(135deg, #f0a500 0%, #e94560 50%, #7b2cbf 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-transform: uppercase;
+    }
+
+    header p {
+      margin-top: 6px;
+      font-size: 0.8rem;
+      letter-spacing: 0.25em;
+      color: #6b7db3;
+      text-transform: uppercase;
+    }
+
+    /* ── card ── */
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.72rem;
+      letter-spacing: 0.2em;
+      color: #6b7db3;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    textarea {
+      width: 100%;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 14px 16px;
+      color: #dde1f5;
+      font-family: inherit;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    textarea::placeholder { color: #3d4a6e; }
+    textarea:focus { border-color: rgba(240,165,0,0.45); }
+
+    #prompt     { min-height: 110px; }
+    #followup   { min-height: 72px; }
+
+    /* ── actions ── */
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .run-btn {
+      padding: 10px 28px;
+      background: linear-gradient(135deg, #f0a500, #e94560);
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.15s;
+    }
+
+    .run-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+    .run-btn:active:not(:disabled) { transform: translateY(0); }
+    .run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .viz-link {
+      font-size: 0.78rem;
+      letter-spacing: 0.12em;
+      color: #4361ee;
+      text-decoration: none;
+      text-transform: uppercase;
+      border: 1px solid rgba(67,97,238,0.4);
+      border-radius: 6px;
+      padding: 10px 18px;
+      transition: background 0.2s, color 0.2s;
+    }
+    .viz-link:hover {
+      background: rgba(67,97,238,0.15);
+      color: #7ba5ff;
+    }
+
+    /* ── status ── */
+    #status {
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      color: #6b7db3;
+      text-transform: uppercase;
+      min-height: 1rem;
+    }
+
+    #status.running { color: #f0a500; }
+    #status.done    { color: #06d6a0; }
+    #status.error   { color: #e94560; }
+
+    /* ── output (model calls) ── */
+    #output-wrap { display: none; }
+
+    #output {
+      background: #030310;
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px;
+      padding: 18px 20px;
+      font-size: 0.82rem;
+      line-height: 1.75;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #b0bce8;
+      max-height: 480px;
+      overflow-y: auto;
+    }
+
+    .line-tool  { color: #4cc9f0; }
+    .line-error { color: #e94560; }
+    .line-ok    { color: #06d6a0; }
+    .line-head  { color: #f0a500; font-weight: bold; }
+
+    /* ── markdown answer ── */
+    #answer-wrap { display: none; }
+
+    #answer {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px;
+      padding: 24px 28px;
+      line-height: 1.8;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 0.95rem;
+      color: #dde1f5;
+    }
+
+    #answer h1, #answer h2, #answer h3 {
+      color: #f0a500;
+      margin: 1.2em 0 0.5em;
+      font-weight: 700;
+    }
+    #answer h1 { font-size: 1.4rem; }
+    #answer h2 { font-size: 1.15rem; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px; }
+    #answer h3 { font-size: 1rem; color: #c8a84b; }
+    #answer p  { margin: 0.6em 0; }
+    #answer ul, #answer ol { padding-left: 1.4em; margin: 0.6em 0; }
+    #answer li { margin: 0.3em 0; }
+    #answer strong { color: #fff; }
+    #answer em     { color: #b0bce8; }
+    #answer code {
+      background: rgba(76,201,240,0.1);
+      color: #4cc9f0;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85em;
+    }
+    #answer pre {
+      background: #030310;
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 6px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 0.8em 0;
+    }
+    #answer pre code { background: none; padding: 0; color: #b0bce8; font-size: 0.82rem; }
+    #answer table { width: 100%; border-collapse: collapse; margin: 0.8em 0; font-size: 0.88rem; }
+    #answer th { background: rgba(240,165,0,0.1); color: #f0a500; padding: 8px 12px; border: 1px solid rgba(255,255,255,0.08); text-align: left; }
+    #answer td { padding: 7px 12px; border: 1px solid rgba(255,255,255,0.06); }
+    #answer tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    #answer blockquote { border-left: 3px solid #f0a500; margin: 0.8em 0; padding: 6px 16px; color: #8895c0; }
+    #answer a { color: #4361ee; }
+
+    /* ── follow-up ── */
+    #followup-wrap { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="stars"></canvas>
+
+  <div class="container">
+    <header>
+      <h1>Apollo</h1>
+      <p>Autonomous MCP Server Factory</p>
+    </header>
+
+    <!-- initial prompt -->
+    <div class="card">
+      <label for="prompt">Your goal</label>
+      <textarea
+        id="prompt"
+        placeholder="You are an agent that...."
+        autofocus
+      ></textarea>
+      <div class="actions">
+        <button id="run-btn" class="run-btn">Run</button>
+        <a class="viz-link" href="http://localhost:8765" target="_blank">View Visualization ↗</a>
+        <span id="status"></span>
+      </div>
+    </div>
+
+    <!-- model calls log -->
+    <div id="output-wrap" class="card">
+      <label>Model calls</label>
+      <div id="output"></div>
+    </div>
+
+    <!-- markdown answer -->
+    <div id="answer-wrap" class="card">
+      <label>Answer</label>
+      <div id="answer"></div>
+    </div>
+
+    <!-- follow-up prompt -->
+    <div id="followup-wrap" class="card">
+      <label for="followup">Follow-up</label>
+      <textarea
+        id="followup"
+        placeholder="Ask a follow-up question…"
+      ></textarea>
+      <div class="actions">
+        <button id="followup-btn" class="run-btn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+
+  <!-- star canvas -->
+  <script>
+    const canvas = document.getElementById('stars');
+    const ctx = canvas.getContext('2d');
+    const stars = [];
+
+    function resize() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    for (let i = 0; i < 180; i++) {
+      stars.push({ x: Math.random(), y: Math.random(), r: Math.random() * 1.2 + 0.2, a: Math.random(), da: (Math.random() - 0.5) * 0.008 });
+    }
+
+    function drawStars() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      stars.forEach(s => {
+        s.a = Math.max(0.1, Math.min(1, s.a + s.da));
+        if (s.a <= 0.1 || s.a >= 1) s.da *= -1;
+        ctx.beginPath();
+        ctx.arc(s.x * canvas.width, s.y * canvas.height, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(200,210,255,${s.a})`;
+        ctx.fill();
+      });
+      requestAnimationFrame(drawStars);
+    }
+    drawStars();
+  </script>
+
+  <!-- supervisor streaming -->
+  <script>
+    const runBtn      = document.getElementById('run-btn');
+    const promptEl    = document.getElementById('prompt');
+    const outputEl    = document.getElementById('output');
+    const outputWrap  = document.getElementById('output-wrap');
+    const answerWrap  = document.getElementById('answer-wrap');
+    const answerEl    = document.getElementById('answer');
+    const statusEl    = document.getElementById('status');
+    const followupWrap = document.getElementById('followup-wrap');
+    const followupEl  = document.getElementById('followup');
+    const followupBtn = document.getElementById('followup-btn');
+
+    let es = null;
+
+    function setRunning(running) {
+      runBtn.disabled = running;
+      followupBtn.disabled = running;
+      statusEl.className = running ? 'running' : '';
+      statusEl.textContent = running ? 'Running…' : '';
+    }
+
+    function colorLine(text) {
+      const t = text.trim();
+      if (!t) return null;
+      let cls = '';
+      if (/✗|error|Error|FAIL/i.test(t))            cls = 'line-error';
+      else if (/✓|success|deployed|done/i.test(t))  cls = 'line-ok';
+      else if (/tool|calling|mcp|→/i.test(t))        cls = 'line-tool';
+      else if (/^[A-Z].*:{0,1}$/.test(t) || /^[═─]+/.test(t)) cls = 'line-head';
+      const span = document.createElement('span');
+      if (cls) span.className = cls;
+      span.textContent = text + '\n';
+      return span;
+    }
+
+    function appendLine(text) {
+      const el = colorLine(text);
+      if (el) outputEl.appendChild(el);
+      else outputEl.appendChild(document.createTextNode(text + '\n'));
+      outputEl.scrollTop = outputEl.scrollHeight;
+    }
+
+    function runPrompt(prompt) {
+      if (!prompt) return;
+
+      if (es) { es.close(); es = null; }
+
+      // reset UI
+      outputEl.textContent = '';
+      answerEl.innerHTML = '';
+      outputWrap.style.display = 'block';
+      answerWrap.style.display = 'none';
+      followupWrap.style.display = 'none';
+      followupEl.value = '';
+      setRunning(true);
+
+      es = new EventSource('/run?prompt=' + encodeURIComponent(prompt));
+
+      es.addEventListener('output', e => appendLine(e.data));
+
+      es.addEventListener('final_answer', e => {
+        answerEl.innerHTML = marked.parse(e.data);
+        answerWrap.style.display = 'block';
+      });
+
+      es.addEventListener('done', () => {
+        es.close(); es = null;
+        setRunning(false);
+        statusEl.className = 'done';
+        statusEl.textContent = 'Done';
+        followupWrap.style.display = 'block';
+        followupWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        followupEl.focus();
+      });
+
+      es.addEventListener('error_msg', e => {
+        appendLine('ERROR: ' + e.data);
+        es.close(); es = null;
+        setRunning(false);
+        statusEl.className = 'error';
+        statusEl.textContent = 'Error';
+        followupWrap.style.display = 'block';
+      });
+
+      es.onerror = () => {
+        if (es && es.readyState === EventSource.CLOSED) {
+          setRunning(false);
+          if (statusEl.className === 'running') {
+            statusEl.className = 'error';
+            statusEl.textContent = 'Connection lost';
+          }
+        }
+      };
+    }
+
+    runBtn.addEventListener('click', () => runPrompt(promptEl.value.trim()));
+    promptEl.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runPrompt(promptEl.value.trim());
+    });
+
+    followupBtn.addEventListener('click', () => {
+      const p = followupEl.value.trim();
+      if (!p) return;
+      promptEl.value = p;   // reflect in main box for context
+      runPrompt(p);
+    });
+    followupEl.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') followupBtn.click();
+    });
+  </script>
+</body>
+</html>
