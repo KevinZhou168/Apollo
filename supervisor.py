@@ -697,37 +697,55 @@ def supervisor(user_prompt: str, test_mode: bool = False, verbose: bool = True, 
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(
         description="Run supervisor agent to answer questions using dynamic MCP tools",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python supervisor.py --prompt "plan a 5-day trip to barcelona"
-  python supervisor.py --prompt "weather in madrid" --no-auto-build
-  python supervisor.py --prompt "hello" --test
-  
-The supervisor will automatically build tools if the registry is empty,
-unless --no-auto-build is specified.
-        """
     )
-    parser.add_argument("--prompt", type=str, required=True, help="User prompt/question")
     parser.add_argument("--test", action="store_true", help="Run in test mode (mock registry)")
-    parser.add_argument("--no-auto-build", action="store_true", 
+    parser.add_argument("--no-auto-build", action="store_true",
                        help="Disable automatic tool building (error if registry empty)")
-    
+    parser.add_argument("--prompt", type=str, default=None, help="Run with this prompt and exit (non-interactive)")
+
     args = parser.parse_args()
-    
-    try:
-        result = supervisor(
-            args.prompt, 
-            test_mode=args.test, 
-            verbose=True,
-            auto_build_tools=not args.no_auto_build
-        )
-        print(f"\n✓ Success")
-    except Exception as e:
-        print(f"\n✗ Error: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+
+    if args.prompt:
+        try:
+            supervisor(
+                args.prompt,
+                test_mode=args.test,
+                verbose=True,
+                auto_build_tools=not args.no_auto_build,
+            )
+        except Exception as e:
+            import traceback
+            print(f"\n  ✗ Error: {e}", file=sys.stderr)
+            traceback.print_exc()
+        sys.exit(0)
+
+    print("\n  Atlas Supervisor  —  type your prompt and press Enter, or 'quit' to exit.\n")
+
+    while True:
+        try:
+            prompt = input("  › ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  bye!")
+            sys.exit(0)
+
+        if not prompt:
+            continue
+        if prompt.lower() in ("quit", "exit", "q"):
+            print("  bye!")
+            sys.exit(0)
+
+        try:
+            supervisor(
+                prompt,
+                test_mode=args.test,
+                verbose=True,
+                auto_build_tools=not args.no_auto_build,
+            )
+        except Exception as e:
+            import traceback
+            print(f"\n  ✗ Error: {e}", file=sys.stderr)
+            traceback.print_exc()
+        print()
