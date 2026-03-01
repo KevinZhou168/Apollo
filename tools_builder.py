@@ -104,7 +104,7 @@ def _assess_confidence(code: str) -> dict:
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 # LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
-LLM_PROVIDER = "openai"
+LLM_PROVIDER = "anthropic"
 if LLM_PROVIDER not in ("anthropic", "openai"):
     print(f"Error: LLM_PROVIDER must be 'anthropic' or 'openai', got '{LLM_PROVIDER}'", file=sys.stderr)
     sys.exit(1)
@@ -194,8 +194,12 @@ def plan_tools(goal: str) -> list[dict]:
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
-        print(f"  [plan_tools] JSON parse failed: {e}")
-        print(f"  [plan_tools] Raw output (first 500 chars): {raw[:500]}")
+        print(f"\n✗ LLM returned invalid JSON. Error: {e}")
+        print(f"\n--- RAW LLM RESPONSE ---")
+        print(raw[:2000])
+        if len(raw) > 2000:
+            print(f"\n... (truncated, total length: {len(raw)} chars)")
+        print(f"--- END RAW RESPONSE ---\n")
         raise
 
 
@@ -292,7 +296,9 @@ def deploy_file(filepath: Path) -> tuple[bool, str | None]:
     print(_DIM + output + _R)
     url = None
     if result.returncode == 0:
-        match = re.search(r"https://[a-z0-9-]+--[a-z0-9-]+-web\.modal\.run", output)
+        # Modal wraps long lines in its output; collapse continuation lines before matching
+        collapsed = re.sub(r"\n[ \t]+", "", output)
+        match = re.search(r"https://[a-z0-9-]+--[a-z0-9-]+-web\.modal\.run", collapsed)
         if match:
             url = match.group(0)
     return result.returncode == 0, url
@@ -338,6 +344,80 @@ def run_tests_locally(endpoint_url: str, test_code: str) -> str:
         return "Tests timed out after 60 seconds."
     finally:
         test_file.unlink(missing_ok=True)
+
+
+# ── Registry registration (runs locally) ───────────────────────────────────────
+
+REGISTRY_NAME = "mcp-tool-registry"
+
+def _extract_app_name_from_file(filepath: Path) -> str | None:
+    """Extract the Modal app name from a generated MCP file."""
+    content = filepath.read_text()
+    # Match the actual app definition, not comments
+    # Look for: app = modal.App("name")
+    match = re.search(r'^app\s*=\s*modal\.App\(["\']([^"\']+)["\']\)', content, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def get_modal_workspace() -> str | None:
+    """Get the current Modal workspace name."""
+    try:
+        result = subprocess.run(
+            ["modal", "profile", "current"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"    [!] modal profile current failed: {result.stderr}")
+            return None
+        
+        # The output is just the workspace name (e.g., "kevinzhou168")
+        workspace = result.stdout.strip()
+        if workspace:
+            print(f"    → Detected workspace: {workspace}")
+            return workspace
+        
+        print(f"    [!] modal profile current returned empty output")
+        return None
+    except Exception as e:
+        print(f"    [!] Error getting workspace: {e}")
+        return None
+
+
+def register_mcp_in_registry(filepath: Path, workspace: str) -> bool:
+    """
+    Register a deployed MCP in the Modal.Dict registry.
+    
+    Args:
+        filepath: Path to the deployed MCP file.
+        workspace: Modal workspace name.
+        
+    Returns:
+        True if registration succeeded, False otherwise.
+    """
+    try:
+        app_name = _extract_app_name_from_file(filepath)
+        if not app_name:
+            print(f"      [!] Could not extract app name from {filepath.name}")
+            return False
+        
+        # Construct endpoint URL
+        url = f"https://{workspace}--{app_name}-web.modal.run"
+        
+        print(f"      → Registering {app_name} at {url}")
+        
+        # Register in Modal.Dict
+        registry = modal.Dict.from_name(REGISTRY_NAME, create_if_missing=True)
+        registry[app_name] = url
+        
+        print(f"      ✓ Registered in registry: {app_name}")
+        return True
+    
+    except Exception as e:
+        import traceback
+        print(f"      [!] Registry error: {e}")
+        print(f"      [!] Traceback: {traceback.format_exc()}")
+        return False
 
 
 # ── Entrypoint ─────────────────────────────────────────────────────────────────
@@ -500,7 +580,11 @@ def main(goal: str = ""):
 
     from mcp_builder import interpret_results  # runs locally
 
-    summary: list[tuple[str, str]] = []
+    workspace = get_modal_workspace()
+    if not workspace:
+        print(f"  {_Y}  ⚠  could not detect Modal workspace — registry skipped{_R}")
+
+    summary: list[tuple[str, str, bool]] = []
 
     for idx, (tool, (code, test_code)) in enumerate(zip(tools, generated), 1):
         slug      = tool["slug"]
@@ -517,6 +601,7 @@ def main(goal: str = ""):
         current_tests  = test_code
         current_prompt = prompt
         final_status   = None
+        registered     = False
 
         viz_emit("phase", {"text": f"Deploying {slug}…"})
         # Create deploy validation node upfront (JS skips duplicates)
@@ -582,6 +667,8 @@ def main(goal: str = ""):
                 viz_emit("status", {"id": f"v_{slug}_deploy", "status": "deployed"})
                 viz_emit("status", {"id": f"v_{slug}_test",   "status": "deployed"})
                 viz_emit("status", {"id": f"srv_{slug}",      "status": "deployed"})
+                if workspace:
+                    registered = register_mcp_in_registry(filepath, workspace)
                 final_status = "deployed"
                 break
             elif verdict == "transient":
@@ -619,17 +706,13 @@ def main(goal: str = ""):
             viz_emit("status", {"id": f"srv_{slug}", "status": "failed"})
             final_status = "skipped (failed after retries)"
 
-        summary.append((slug, final_status))
+        summary.append((slug, final_status, registered))
 
     # ── 7. Summary ─────────────────────────────────────────────────────────────
-    deployed  = [(n, s) for n, s in summary if s == "deployed"]
-    transient = [(n, s) for n, s in summary if "external" in s]
-    failed    = [(n, s) for n, s in summary if "retries" in s]
-
     print(f"\n{_C}{_B}{'━' * 54}{_R}")
     print(f"{_C}{_B}  RESULTS  ·  {len(summary)} servers processed{_R}")
     print(f"{_C}{_B}{'━' * 54}{_R}")
-    for name, status in summary:
+    for name, status, reg in summary:
         if status == "deployed":
             icon, col = "✓", _G
         elif "external" in status:
@@ -637,7 +720,8 @@ def main(goal: str = ""):
         else:
             icon, col = "✗", _RE
         label = status.replace("skipped (", "").rstrip(")")
-        print(f"  {col}{_B}{icon}{_R}  {_B}{name}{_R}  {_DIM}{label}{_R}")
+        reg_tag = f"  {_G}[✓ reg]{_R}" if reg else f"  {_DIM}[✗ reg]{_R}"
+        print(f"  {col}{_B}{icon}{_R}  {_B}{name}{_R}  {_DIM}{label}{_R}{reg_tag}")
     print(f"{_C}{_B}{'━' * 54}{_R}")
     print(f"\n  {_DIM}files saved to  {OUTPUT_DIR}/{_R}")
 
