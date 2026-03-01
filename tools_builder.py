@@ -115,10 +115,22 @@ def plan_tools(goal: str) -> list[dict]:
             ],
         )
         raw = message.choices[0].message.content.strip()
+    # Strip markdown fences if present
     if raw.startswith("```"):
         raw = re.sub(r"^```[^\n]*\n", "", raw)
         raw = re.sub(r"\n```\s*$", "", raw)
-    return json.loads(raw)
+    
+    # Try to parse JSON with better error handling
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"\n✗ LLM returned invalid JSON. Error: {e}")
+        print(f"\n--- RAW LLM RESPONSE ---")
+        print(raw[:2000])  # Print first 2000 chars
+        if len(raw) > 2000:
+            print(f"\n... (truncated, total length: {len(raw)} chars)")
+        print(f"--- END RAW RESPONSE ---\n")
+        raise
 
 
 # ── Modal worker (runs in parallel on Modal) ───────────────────────────────────
@@ -204,6 +216,80 @@ def deploy_file(filepath: Path) -> bool:
     return result.returncode == 0
 
 
+# ── Registry registration (runs locally) ───────────────────────────────────────
+
+REGISTRY_NAME = "mcp-tool-registry"
+
+def extract_app_name(filepath: Path) -> str | None:
+    """Extract the Modal app name from a generated MCP file."""
+    content = filepath.read_text()
+    # Match the actual app definition, not comments
+    # Look for: app = modal.App("name")
+    match = re.search(r'^app\s*=\s*modal\.App\(["\']([^"\']+)["\']\)', content, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def get_modal_workspace() -> str | None:
+    """Get the current Modal workspace name."""
+    try:
+        result = subprocess.run(
+            ["modal", "profile", "current"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"    [!] modal profile current failed: {result.stderr}")
+            return None
+        
+        # The output is just the workspace name (e.g., "kevinzhou168")
+        workspace = result.stdout.strip()
+        if workspace:
+            print(f"    → Detected workspace: {workspace}")
+            return workspace
+        
+        print(f"    [!] modal profile current returned empty output")
+        return None
+    except Exception as e:
+        print(f"    [!] Error getting workspace: {e}")
+        return None
+
+
+def register_mcp_in_registry(filepath: Path, workspace: str) -> bool:
+    """
+    Register a deployed MCP in the Modal.Dict registry.
+    
+    Args:
+        filepath: Path to the deployed MCP file.
+        workspace: Modal workspace name.
+        
+    Returns:
+        True if registration succeeded, False otherwise.
+    """
+    try:
+        app_name = extract_app_name(filepath)
+        if not app_name:
+            print(f"      [!] Could not extract app name from {filepath.name}")
+            return False
+        
+        # Construct endpoint URL
+        url = f"https://{workspace}--{app_name}-web.modal.run"
+        
+        print(f"      → Registering {app_name} at {url}")
+        
+        # Register in Modal.Dict
+        registry = modal.Dict.from_name(REGISTRY_NAME, create_if_missing=True)
+        registry[app_name] = url
+        
+        print(f"      ✓ Registered in registry: {app_name}")
+        return True
+    
+    except Exception as e:
+        import traceback
+        print(f"      [!] Registry error: {e}")
+        print(f"      [!] Traceback: {traceback.format_exc()}")
+        return False
+
+
 # ── Entrypoint ─────────────────────────────────────────────────────────────────
 
 @app.local_entrypoint()
@@ -270,17 +356,37 @@ def main(goal: str = ""):
     # ── 6. Deploy all (stop oldest apps if at endpoint limit) ─────────────────
     make_room_for(len(saved_files))
     print(f"\n Deploying all servers …")
-    results: list[tuple[str, bool]] = []
+    
+    # Get workspace for registry
+    workspace = get_modal_workspace()
+    if not workspace:
+        print("    [!] Warning: Could not determine Modal workspace.")
+        print("    [!] MCPs will be deployed but NOT registered in the registry.")
+        print("    [!] Run 'modal run registry_manager.py --action auto-register' to register them manually.")
+    
+    results: list[tuple[str, bool, bool]] = []  # (filename, deployed, registered)
     for filepath in saved_files:
-        ok = deploy_file(filepath)
-        results.append((filepath.name, ok))
+        deployed = deploy_file(filepath)
+        registered = False
+        
+        if deployed and workspace:
+            registered = register_mcp_in_registry(filepath, workspace)
+        
+        results.append((filepath.name, deployed, registered))
 
     # ── 7. Summary ─────────────────────────────────────────────────────────────
-    print("\n" + "━" * 56)
+    print("\n" + "━" * 70)
     print("  Summary")
-    print("━" * 56)
-    for name, ok in results:
-        status = "deployed" if ok else "FAILED  "
-        print(f"  [{status}] {name}")
-    print("━" * 56)
+    print("━" * 70)
+    for name, deployed, registered in results:
+        deploy_status = "deployed" if deployed else "FAILED  "
+        registry_status = "✓" if registered else "✗"
+        print(f"  [{deploy_status}] [{registry_status} registry] {name}")
+    print("━" * 70)
     print(f"\n  Generated files: {OUTPUT_DIR}/")
+    
+    if workspace:
+        print(f"  Registry: {REGISTRY_NAME} (Modal.Dict)")
+        registered_count = sum(1 for _, _, r in results if r)
+        print(f"  Registered: {registered_count}/{len(results)} MCPs")
+    print()
