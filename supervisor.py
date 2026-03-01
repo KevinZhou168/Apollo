@@ -42,7 +42,7 @@ except ImportError:
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 #LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
-LLM_PROVIDER = "anthropic"
+LLM_PROVIDER = "openai"
 if LLM_PROVIDER not in ("anthropic", "openai"):
     print(f"Error: LLM_PROVIDER must be 'anthropic' or 'openai', got '{LLM_PROVIDER}'", file=sys.stderr)
     sys.exit(1)
