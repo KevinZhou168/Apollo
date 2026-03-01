@@ -1,227 +1,470 @@
 [
-  {
-    "name": "Open-Meteo",
-    "description": "Free weather forecast API with hourly and daily forecasts, historical data, and climate projections worldwide",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://open-meteo.com/en/docs",
-    "category": "Weather"
-  },
-  {
-    "name": "wttr.in",
-    "description": "Weather service with simple API returning current conditions and forecasts in JSON, plain text, or PNG formats",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://wttr.in/:help",
-    "category": "Weather"
-  },
-  {
-    "name": "Aviation Stack",
-    "description": "Real-time flight status, schedules, airline routes, airports, and aviation data (free tier, no key needed for basic queries)",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://aviationstack.com/documentation",
-    "category": "Aviation"
-  },
-  {
-    "name": "OpenSky Network",
-    "description": "Live aircraft tracking and flight data including real-time positions, velocity, and altitude of flights worldwide",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://openskynetwork.github.io/opensky-api/",
-    "category": "Aviation"
-  },
-  {
-    "name": "Frankfurter",
-    "description": "Real-time and historical foreign exchange rates from the European Central Bank — great for travel budgeting",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://www.frankfurter.app/docs",
-    "category": "Currency"
-  },
-  {
-    "name": "ExchangeRate-API (free tier)",
-    "description": "Up-to-date currency exchange rates for 160+ currencies, no key required for basic endpoint",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://www.exchangerate-api.com/docs/free",
-    "category": "Currency"
-  },
-  {
-    "name": "Nominatim (OpenStreetMap)",
-    "description": "Geocoding and reverse geocoding API — convert addresses to coordinates and vice versa, globally",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://nominatim.org/release-docs/latest/api/Overview/",
-    "category": "Geocoding"
-  },
-  {
-    "name": "Open-Elevation",
-    "description": "Free elevation data API — returns altitude in meters for any latitude/longitude on Earth",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://open-elevation.com/#documentation",
-    "category": "Geography"
-  },
-  {
-    "name": "REST Countries",
-    "description": "Detailed info on every country: capitals, currencies, languages, timezones, flags, calling codes, and borders",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://restcountries.com/",
-    "category": "Geography"
-  },
-  {
-    "name": "GeoNames",
-    "description": "Geographical database covering all countries with cities, postal codes, timezones, and elevation data",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://www.geonames.org/export/web-services.html",
-    "category": "Geography"
-  },
-  {
-    "name": "World Time API",
-    "description": "Returns current local time for any timezone — useful for knowing local time at a travel destination",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://worldtimeapi.org/",
-    "category": "Time"
-  },
-  {
-    "name": "TimeZoneDB",
-    "description": "Time zone data by city or coordinates, including UTC offset and daylight saving time info",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://timezonedb.com/api",
-    "category": "Time"
-  },
-  {
-    "name": "GBFS (Bike Share)",
-    "description": "General Bikeshare Feed Specification — real-time availability of shared bikes and scooters in hundreds of cities globally",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://gbfs.mobilitydata.org/",
-    "category": "Transportation"
-  },
-  {
-    "name": "Transport for London (TfL) Unified API",
-    "description": "Live arrivals, disruptions, journey planner, and status for all London transport modes including Tube, bus, and rail",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://api.tfl.gov.uk/",
-    "category": "Transportation"
-  },
-  {
-    "name": "SNCF Open Data",
-    "description": "Real-time French train schedules, disruptions, and station information across France",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://data.sncf.com/api/explore/v2.1/console",
-    "category": "Transportation"
-  },
-  {
-    "name": "511 SF Bay (511.org)",
-    "description": "Real-time transit, traffic, and parking data for the San Francisco Bay Area",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://511.org/open-data/transit",
-    "category": "Transportation"
-  },
-  {
-    "name": "Global Airport Database",
-    "description": "Static and semi-live info on 9,300+ airports worldwide including IATA codes, coordinates, and runways",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://www.globalairportdatabase.com/",
-    "category": "Aviation"
-  },
-  {
-    "name": "Sunrise-Sunset",
-    "description": "Returns accurate sunrise, sunset, solar noon, and twilight times for any coordinates and date",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://sunrise-sunset.org/api",
-    "category": "Astronomy"
-  },
-  {
-    "name": "Open Notify (ISS Location)",
-    "description": "Real-time position of the International Space Station and next pass times over any location — unique travel curiosity tool",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "http://open-notify.org/Open-Notify-API/",
-    "category": "Astronomy"
-  },
-  {
-    "name": "OpenAQ",
-    "description": "Real-time and historical air quality data from thousands of monitoring stations in 100+ countries",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://docs.openaq.org/",
-    "category": "Environment"
-  },
-  {
-    "name": "WAQI (World Air Quality Index)",
-    "description": "Live AQI readings and pollution data for thousands of cities globally — essential for health-conscious travelers",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://aqicn.org/api/",
-    "category": "Environment"
-  },
-  {
-    "name": "USGS Earthquake Hazards",
-    "description": "Real-time global earthquake data including magnitude, depth, and location — updated every minute",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://earthquake.usgs.gov/fdsnws/event/1/",
-    "category": "Safety"
-  },
-  {
-    "name": "CDC Travel Health Notices",
-    "description": "Up-to-date health and disease outbreak notices for international travel destinations",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://www.cdc.gov/travel-health-notices/index.html",
-    "category": "Safety"
-  },
-  {
-    "name": "Overpass API (OpenStreetMap)",
-    "description": "Query OpenStreetMap data live — find nearby hotels, restaurants, ATMs, hospitals, transit stops, and POIs anywhere on Earth",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://overpass-api.de/",
-    "category": "Points of Interest"
-  },
-  {
-    "name": "Wikivoyage API",
-    "description": "Free travel guide content for destinations worldwide via the MediaWiki API — attractions, itineraries, and tips",
-    "auth": "none",
-    "https": true,
-    "cors": "Yes",
-    "link": "https://en.wikivoyage.org/w/api.php",
-    "category": "Travel Guides"
-  }
-]
+	{
+	  "name": "Open-Meteo",
+	  "description": "Free weather forecast API with hourly and daily forecasts, historical data, and climate projections worldwide",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://open-meteo.com/en/docs",
+	  "category": "Weather"
+	},
+	{
+	  "name": "wttr.in",
+	  "description": "Weather service with simple API returning current conditions and forecasts in JSON, plain text, or PNG formats",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://wttr.in/:help",
+	  "category": "Weather"
+	},
+	{
+	  "name": "Aviation Stack",
+	  "description": "Real-time flight status, schedules, airline routes, airports, and aviation data (free tier, no key needed for basic queries)",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://aviationstack.com/documentation",
+	  "category": "Aviation"
+	},
+	{
+	  "name": "OpenSky Network",
+	  "description": "Live aircraft tracking and flight data including real-time positions, velocity, and altitude of flights worldwide",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://openskynetwork.github.io/opensky-api/",
+	  "category": "Aviation"
+	},
+	{
+	  "name": "Frankfurter",
+	  "description": "Real-time and historical foreign exchange rates from the European Central Bank — great for travel budgeting",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.frankfurter.app/docs",
+	  "category": "Currency"
+	},
+	{
+	  "name": "ExchangeRate-API (free tier)",
+	  "description": "Up-to-date currency exchange rates for 160+ currencies, no key required for basic endpoint",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.exchangerate-api.com/docs/free",
+	  "category": "Currency"
+	},
+	{
+	  "name": "Nominatim (OpenStreetMap)",
+	  "description": "Geocoding and reverse geocoding API — convert addresses to coordinates and vice versa, globally",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://nominatim.org/release-docs/latest/api/Overview/",
+	  "category": "Geocoding"
+	},
+	{
+	  "name": "Open-Elevation",
+	  "description": "Free elevation data API — returns altitude in meters for any latitude/longitude on Earth",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://open-elevation.com/#documentation",
+	  "category": "Geography"
+	},
+	{
+	  "name": "REST Countries",
+	  "description": "Detailed info on every country: capitals, currencies, languages, timezones, flags, calling codes, and borders",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://restcountries.com/",
+	  "category": "Geography"
+	},
+	{
+	  "name": "GeoNames",
+	  "description": "Geographical database covering all countries with cities, postal codes, timezones, and elevation data",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.geonames.org/export/web-services.html",
+	  "category": "Geography"
+	},
+	{
+	  "name": "World Time API",
+	  "description": "Returns current local time for any timezone — useful for knowing local time at a travel destination",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://worldtimeapi.org/",
+	  "category": "Time"
+	},
+	{
+	  "name": "TimeZoneDB",
+	  "description": "Time zone data by city or coordinates, including UTC offset and daylight saving time info",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://timezonedb.com/api",
+	  "category": "Time"
+	},
+	{
+	  "name": "GBFS (Bike Share)",
+	  "description": "General Bikeshare Feed Specification — real-time availability of shared bikes and scooters in hundreds of cities globally",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://gbfs.mobilitydata.org/",
+	  "category": "Transportation"
+	},
+	{
+	  "name": "Transport for London (TfL) Unified API",
+	  "description": "Live arrivals, disruptions, journey planner, and status for all London transport modes including Tube, bus, and rail",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://api.tfl.gov.uk/",
+	  "category": "Transportation"
+	},
+	{
+	  "name": "SNCF Open Data",
+	  "description": "Real-time French train schedules, disruptions, and station information across France",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://data.sncf.com/api/explore/v2.1/console",
+	  "category": "Transportation"
+	},
+	{
+	  "name": "511 SF Bay (511.org)",
+	  "description": "Real-time transit, traffic, and parking data for the San Francisco Bay Area",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://511.org/open-data/transit",
+	  "category": "Transportation"
+	},
+	{
+	  "name": "Global Airport Database",
+	  "description": "Static and semi-live info on 9,300+ airports worldwide including IATA codes, coordinates, and runways",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.globalairportdatabase.com/",
+	  "category": "Aviation"
+	},
+	{
+	  "name": "Sunrise-Sunset",
+	  "description": "Returns accurate sunrise, sunset, solar noon, and twilight times for any coordinates and date",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://sunrise-sunset.org/api",
+	  "category": "Astronomy"
+	},
+	{
+	  "name": "Open Notify (ISS Location)",
+	  "description": "Real-time position of the International Space Station and next pass times over any location — unique travel curiosity tool",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "http://open-notify.org/Open-Notify-API/",
+	  "category": "Astronomy"
+	},
+	{
+	  "name": "OpenAQ",
+	  "description": "Real-time and historical air quality data from thousands of monitoring stations in 100+ countries",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://docs.openaq.org/",
+	  "category": "Environment"
+	},
+	{
+	  "name": "WAQI (World Air Quality Index)",
+	  "description": "Live AQI readings and pollution data for thousands of cities globally — essential for health-conscious travelers",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://aqicn.org/api/",
+	  "category": "Environment"
+	},
+	{
+	  "name": "USGS Earthquake Hazards",
+	  "description": "Real-time global earthquake data including magnitude, depth, and location — updated every minute",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://earthquake.usgs.gov/fdsnws/event/1/",
+	  "category": "Safety"
+	},
+	{
+	  "name": "CDC Travel Health Notices",
+	  "description": "Up-to-date health and disease outbreak notices for international travel destinations",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.cdc.gov/travel-health-notices/index.html",
+	  "category": "Safety"
+	},
+	{
+	  "name": "Overpass API (OpenStreetMap)",
+	  "description": "Query OpenStreetMap data live — find nearby hotels, restaurants, ATMs, hospitals, transit stops, and POIs anywhere on Earth",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://overpass-api.de/",
+	  "category": "Points of Interest"
+	},
+	{
+	  "name": "Wikivoyage API",
+	  "description": "Free travel guide content for destinations worldwide via the MediaWiki API — attractions, itineraries, and tips",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://en.wikivoyage.org/w/api.php",
+	  "category": "Travel Guides"
+	},  
+	{
+	  "name": "OSRM (Open Source Routing Machine)",
+	  "description": "Fast route planning and turn-by-turn directions between any coordinates using OpenStreetMap road data — walking, cycling, and driving modes",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://project-osrm.org/docs/v5.24.0/api/",
+	  "category": "Routing & Navigation"
+	},
+	{
+	  "name": "Openrouteservice",
+	  "description": "Advanced routing API with directions, isochrones (reachability zones), and matrix distances — great for optimizing a day's itinerary",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://openrouteservice.org/dev/#/api-docs",
+	  "category": "Routing & Navigation"
+	},
+	{
+	  "name": "Valhalla Routing (Mapzen)",
+	  "description": "Open-source multimodal routing engine supporting driving, walking, cycling, and transit with time-based optimization",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://valhalla.github.io/valhalla/api/turn-by-turn/api-reference/",
+	  "category": "Routing & Navigation"
+	},
+	{
+	  "name": "Wikipedia API",
+	  "description": "Fetch summaries, full articles, and nearby Wikipedia pages for any location — surface history and context for places on your itinerary",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.mediawiki.org/wiki/API:Main_page",
+	  "category": "Points of Interest"
+	},
+	{
+	  "name": "Wikipedia Geosearch",
+	  "description": "Returns Wikipedia articles for landmarks and points of interest within a radius of any lat/lng coordinate",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.mediawiki.org/wiki/API:Geosearch",
+	  "category": "Points of Interest"
+	},
+	{
+	  "name": "OpenTripMap",
+	  "description": "Database of 1M+ tourist attractions worldwide with categories, ratings, and descriptions — query by radius around any coordinate",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://opentripmap.io/docs",
+	  "category": "Points of Interest"
+	},
+	{
+	  "name": "Wikidata SPARQL",
+	  "description": "Query structured data about museums, landmarks, events, and places worldwide — hours, coordinates, images, and more",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://query.wikidata.org/",
+	  "category": "Points of Interest"
+	},
+	{
+	  "name": "Open Library",
+	  "description": "Find travel guides and destination books by location — useful for deeper research on a place you're visiting",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://openlibrary.org/developers/api",
+	  "category": "Travel Guides"
+	},
+	{
+	  "name": "Public Holidays API",
+	  "description": "Returns public holidays for any country and year — critical for knowing what will be open or closed during your visit",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://date.nager.at/Api",
+	  "category": "Events & Calendars"
+	},
+	{
+	  "name": "Calendarific",
+	  "description": "Global holiday and observance data for 230+ countries including religious, national, and regional holidays",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://calendarific.com/api-documentation",
+	  "category": "Events & Calendars"
+	},
+	{
+	  "name": "Ticketmaster Discovery API",
+	  "description": "Live events, concerts, sports, and shows near any location or city — surface things to do on specific dates",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/",
+	  "category": "Events & Calendars"
+	},
+	{
+	  "name": "OpenAgenda API",
+	  "description": "Aggregated local events and cultural agendas for cities across France and Europe — concerts, exhibitions, festivals",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://developers.openagenda.com/",
+	  "category": "Events & Calendars"
+	},
+	{
+	  "name": "STIB/MIVB Brussels Transit",
+	  "description": "Real-time arrivals and schedules for Brussels public transport — buses, trams, and metro",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://opendata.stib-mivb.be/",
+	  "category": "Transportation"
+	},
+	{
+	  "name": "NavitiaIO",
+	  "description": "Multimodal journey planning API covering transit networks in 40+ countries — plan trips with walking, transit, and bike legs",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://doc.navitia.io/",
+	  "category": "Transportation"
+	},
+	{
+	  "name": "CityBikes API",
+	  "description": "Real-time bike share station availability for 400+ cities worldwide — find available bikes near your next stop",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://api.citybik.es/v2/",
+	  "category": "Transportation"
+	},
+	{
+	  "name": "Photon (Komoot)",
+	  "description": "Fast, open geocoding and place search API powered by OpenStreetMap — autocomplete for addresses and POI names",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://photon.komoot.io/",
+	  "category": "Geocoding"
+	},
+	{
+	  "name": "UV Index API (OpenUV)",
+	  "description": "Real-time UV index and sun protection data for any location — plan outdoor activities around safe sun exposure windows",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.openuv.io/api",
+	  "category": "Environment"
+	},
+	{
+	  "name": "Marine Weather (Open-Meteo Marine)",
+	  "description": "Wave height, sea temperature, wind direction, and swell data for coastal and ocean locations — ideal for beach day planning",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://open-meteo.com/en/docs/marine-weather-api",
+	  "category": "Weather"
+	},
+	{
+	  "name": "Flood & River Gauge Data (USGS Water Services)",
+	  "description": "Real-time stream flow, river levels, and flood stage data for US waterways — useful for hiking and outdoor activity planning",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://waterservices.usgs.gov/rest/",
+	  "category": "Environment"
+	},
+	{
+	  "name": "National Park Service API",
+	  "description": "Hours, alerts, closures, amenities, and visitor info for all US National Parks — essential for day trip planning",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.nps.gov/subjects/developer/api-documentation.htm",
+	  "category": "Points of Interest"
+	},
+	{
+	  "name": "Recreation.gov RIDB API",
+	  "description": "Campsite availability, facility hours, and recreation area info for federally managed US lands",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://ridb.recreation.gov/docs",
+	  "category": "Points of Interest"
+	},
+	{
+	  "name": "Numbeo (Quality of Life)",
+	  "description": "Crowd-sourced cost of living, restaurant price indices, and safety ratings for cities worldwide — budget your day accurately",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.numbeo.com/api/doc.jsp",
+	  "category": "Cost & Budgeting"
+	},
+	{
+	  "name": "Open Food Facts",
+	  "description": "Database of food products by country and region — discover local foods, allergen info, and nutritional data when eating out",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://world.openfoodfacts.org/data",
+	  "category": "Food & Dining"
+	},
+	{
+	  "name": "Zomato / Rapid API Restaurant Search",
+	  "description": "Restaurant discovery with cuisine types, ratings, and locations searchable by city or coordinates",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://developers.zomato.com/api",
+	  "category": "Food & Dining"
+	},
+	{
+	  "name": "MealDB",
+	  "description": "Search meals by country of origin — explore local cuisine and traditional dishes of any destination before or during your trip",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.themealdb.com/api.php",
+	  "category": "Food & Dining"
+	},
+	{
+	  "name": "Google Civic Information API",
+	  "description": "Polling locations, election info, and civic data by address — useful for travelers who need to vote absentee or understand local governance",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://developers.google.com/civic-information",
+	  "category": "Local Information"
+	},
+	{
+	  "name": "Mapillary API",
+	  "description": "Street-level photos from around the world contributed by users — preview streets, trails, and neighborhoods before you visit",
+	  "auth": "none",
+	  "https": true,
+	  "cors": "Yes",
+	  "link": "https://www.mapillary.com/developer/api-documentation",
+	  "category": "Street Imagery"
+	}
+  ]

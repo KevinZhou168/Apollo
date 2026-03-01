@@ -87,3 +87,15 @@ def start_viz_server(port: int = 8765, open_browser: bool = True) -> None:
     time.sleep(1.4)          # give uvicorn time to bind
     if open_browser:
         webbrowser.open(f"http://localhost:{port}/")
+
+
+if __name__ == "__main__":
+    import time
+    print(f"\n  Atlas Visualization  →  http://localhost:8765\n")
+    start_viz_server(port=8765, open_browser=True)
+    # Keep main thread alive (daemon thread exits when main exits)
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n  bye!")
