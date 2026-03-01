@@ -89,6 +89,33 @@ except ImportError:
 
 _SUSPICIOUS_DOMAINS = ["example.com", "fakeapi", "placeholder", "dummyapi", "mockapi"]
 
+def extract_tool_names(code: str) -> list[str]:
+    """Extract @mcp.tool() function names from generated MCP code."""
+    matches = re.findall(r'@mcp\.tool\(\)\s*\n\s*(?:async\s+)?def\s+(\w+)', code)
+    return matches
+
+
+def _fetch_tool_list(endpoint_url: str) -> list[dict]:
+    """Call tools/list on a live MCP server. Returns [] on any error."""
+    import requests
+    try:
+        resp = requests.post(
+            f"{endpoint_url}/mcp/",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        text = resp.text.strip()
+        # Response may be SSE ("data: {...}") or plain JSON
+        for line in text.splitlines():
+            if line.startswith("data: "):
+                return json.loads(line[6:]).get("result", {}).get("tools", [])
+        return json.loads(text).get("result", {}).get("tools", [])
+    except Exception:
+        return []
+
+
 def _assess_confidence(code: str) -> dict:
     """Quick confidence check on generated code (runs locally, no LLM)."""
     import re
@@ -104,7 +131,7 @@ def _assess_confidence(code: str) -> dict:
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 # LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
-LLM_PROVIDER = "openai"
+LLM_PROVIDER = "anthropic"
 if LLM_PROVIDER not in ("anthropic", "openai"):
     print(f"Error: LLM_PROVIDER must be 'anthropic' or 'openai', got '{LLM_PROVIDER}'", file=sys.stderr)
     sys.exit(1)
@@ -527,7 +554,7 @@ def main(goal: str = ""):
     generated = list(build_mcp_and_tests.starmap(args))  # list of (code, test_code)
 
     # Emit server nodes now that we have generated code
-    for i, (t, _) in enumerate(zip(tools, generated)):
+    for i, (t, (code, _)) in enumerate(zip(tools, generated)):
         slug = t["slug"]
         ix   = (i - N / 2 + 0.5) * 160
         viz_emit("node", {
@@ -540,6 +567,25 @@ def main(goal: str = ""):
         })
         viz_emit("edge", {"source": f"agent_{slug}", "target": f"srv_{slug}", "color": "#7b2cbf", "width": 1.5})
         viz_emit("status", {"id": f"agent_{slug}", "status": "deployed"})
+
+        # Emit a tiny moon node for each tool function inside the MCP
+        tool_names = extract_tool_names(code)
+        n_tools = len(tool_names)
+        for j, tool_name in enumerate(tool_names):
+            tool_ix = ix + (j - n_tools / 2 + 0.5) * 38
+            viz_emit("node", {
+                "id": f"tool_{slug}_{tool_name}",
+                "label": tool_name,
+                "bt": "tool_moon",
+                "color": "#8d99ae",
+                "r": 8, "ix": tool_ix, "iy": 178,
+                "desc": f"Tool in {slug}_mcp",
+                "info": f"@mcp.tool() function: {tool_name}",
+            })
+            viz_emit("edge", {
+                "source": f"srv_{slug}", "target": f"tool_{slug}_{tool_name}",
+                "color": "#8d99ae", "width": 0.7,
+            })
 
     # ── 5. Batch syntax check + retry (fast pre-check before deploying) ────────
     print(_sec("SYNTAX CHECK"))
@@ -667,6 +713,14 @@ def main(goal: str = ""):
                 viz_emit("status", {"id": f"v_{slug}_deploy", "status": "deployed"})
                 viz_emit("status", {"id": f"v_{slug}_test",   "status": "deployed"})
                 viz_emit("status", {"id": f"srv_{slug}",      "status": "deployed"})
+                # Fetch live tool list and send to the visualizer for the detail panel
+                live_tools = _fetch_tool_list(endpoint_url)
+                if live_tools:
+                    viz_emit("node_detail", {
+                        "id": f"srv_{slug}",
+                        "endpoint": endpoint_url,
+                        "tools": live_tools,
+                    })
                 if workspace:
                     registered = register_mcp_in_registry(filepath, workspace)
                 final_status = "deployed"

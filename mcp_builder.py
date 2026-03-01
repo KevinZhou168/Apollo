@@ -32,7 +32,7 @@ import anthropic
 # ── Config ────────────────────────────────────────────────────────────────────
 
 # LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
-LLM_PROVIDER = "openai"
+LLM_PROVIDER = "anthropic"
 TEMPLATE_FILE = Path(__file__).parent / "mcp_template.py"
 CODE_MODEL    = "claude-opus-4-6"   if LLM_PROVIDER == "anthropic" else "gpt-5.2"
 HELPER_MODEL  = "claude-sonnet-4-6" if LLM_PROVIDER == "anthropic" else "gpt-4o-mini"

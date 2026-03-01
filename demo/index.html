@@ -244,6 +244,70 @@
       border-top: 1px solid rgba(255, 255, 255, 0.08);
       padding-top: 14px
     }
+
+    #detail-panel .dp-endpoint {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.3);
+      word-break: break-all;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06)
+    }
+
+    #detail-panel .dp-tool {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06)
+    }
+
+    #detail-panel .dp-tool:last-child {
+      border-bottom: none
+    }
+
+    #detail-panel .dp-tool-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: #4cc9f0;
+      margin-bottom: 4px
+    }
+
+    #detail-panel .dp-tool-desc {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.55);
+      line-height: 1.5;
+      margin-bottom: 6px
+    }
+
+    #detail-panel .dp-params {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px
+    }
+
+    #detail-panel .dp-param {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.7)
+    }
+
+    #detail-panel .dp-type {
+      color: rgba(255, 255, 255, 0.3);
+      font-size: 9px
+    }
+
+    #detail-panel .dp-opt {
+      color: rgba(255, 255, 255, 0.25);
+      font-size: 9px;
+      font-style: italic
+    }
   </style>
 </head>
 
@@ -747,6 +811,47 @@
         cs.addColorStop(0, 'rgba(255,255,255,0.5)'); cs.addColorStop(1, 'transparent');
         ctx.beginPath(); ctx.arc(n.x - r * 0.2, n.y - r * 0.25, r * 0.35, 0, TAU);
         ctx.fillStyle = cs; ctx.fill();
+
+      } else if (n.bt === 'tool_moon') {
+        // ── TOOL MOON (tiny, cyan-glowing) ────────────────────────────────────
+        const rot = n.rotOffset + now * n.rotSpeed;
+        const segs = n.shape.length;
+        const pts = [];
+        for (let i = 0; i < segs; i++) {
+          const angle = (i / segs) * TAU + rot;
+          pts.push({ x: n.x + Math.cos(angle) * r * n.shape[i], y: n.y + Math.sin(angle) * r * n.shape[i] });
+        }
+        // Outer glow
+        const tg = ctx.createRadialGradient(n.x, n.y, r * 0.4, n.x, n.y, r * 3);
+        tg.addColorStop(0, rgba(n.color, 0.35));
+        tg.addColorStop(0.5, rgba(n.color, 0.08));
+        tg.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x, n.y, r * 3, 0, TAU);
+        ctx.fillStyle = tg; ctx.fill();
+        // Rocky body with cyan tint
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i <= segs; i++) {
+          const curr = pts[i % segs], prev = pts[(i - 1) % segs];
+          ctx.quadraticCurveTo(prev.x, prev.y, (prev.x + curr.x) / 2, (prev.y + curr.y) / 2);
+        }
+        ctx.closePath();
+        const trg = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.3, r * 0.05, n.x, n.y, r * 1.1);
+        trg.addColorStop(0, lighten(n.color, 50));
+        trg.addColorStop(0.4, n.color);
+        trg.addColorStop(1, darken(n.color, 55));
+        ctx.fillStyle = trg; ctx.fill();
+        // Craters
+        n.craters.slice(0, 2).forEach(c => {
+          ctx.beginPath();
+          ctx.arc(n.x + Math.cos(c.ang + rot) * r * c.dist * 0.7, n.y + Math.sin(c.ang + rot) * r * c.dist * 0.7, r * c.size * 0.5, 0, TAU);
+          ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill();
+        });
+        // Specular
+        const tsp = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.35, 0, n.x - r * 0.3, n.y - r * 0.35, r * 0.4);
+        tsp.addColorStop(0, 'rgba(255,255,255,0.4)'); tsp.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(n.x - r * 0.3, n.y - r * 0.35, r * 0.4, 0, TAU);
+        ctx.fillStyle = tsp; ctx.fill();
       }
 
       ctx.globalAlpha = 1;
@@ -862,8 +967,12 @@
     let camZoom = 1, panX = 0, panY = 0;
     let dragStartX = 0, dragStartY = 0, didDrag = false;
 
-    const typeLabels = { sun: '☀ Sun', planet: '🪐 Planet', moon: '🌑 Moon', comet: '☄ Comet' };
-    const typeColors = { sun: '#FDB813', planet: '#6688cc', moon: '#8a8078', comet: '#44ddff' };
+    const typeLabels = { sun: '☀ Sun', planet: '🪐 Planet', moon: '🌑 Moon', comet: '☄ Comet', tool_moon: '🛠 Tool' };
+    const typeColors = { sun: '#FDB813', planet: '#6688cc', moon: '#8a8078', comet: '#44ddff', tool_moon: '#8d99ae' };
+
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
 
     function screenToWorld(sx, sy) {
       return { x: (sx - panX) / camZoom, y: (sy - panY) / camZoom };
@@ -884,9 +993,28 @@
       const badge = document.getElementById('dp-badge');
       badge.textContent = typeLabels[n.bt] || n.bt;
       badge.style.background = typeColors[n.bt] || '#555';
-      badge.style.color = n.bt === 'moon' ? '#fff' : '#000';
+      badge.style.color = (n.bt === 'moon' || n.bt === 'tool_moon') ? '#fff' : '#000';
       document.getElementById('dp-desc').textContent = n.desc;
-      document.getElementById('dp-info').textContent = n.info || '';
+
+      const infoEl = document.getElementById('dp-info');
+      if (n.tools_detail && n.tools_detail.length > 0) {
+        infoEl.innerHTML = n.tools_detail.map(t => {
+          const props = t.inputSchema && t.inputSchema.properties ? t.inputSchema.properties : {};
+          const required = (t.inputSchema && t.inputSchema.required) || [];
+          const params = Object.entries(props).map(([k, v]) => {
+            const isOpt = !required.includes(k);
+            return `<span class="dp-param">${esc(k)}<span class="dp-type">${esc(v.type || '')}</span>${isOpt ? '<span class="dp-opt">opt</span>' : ''}</span>`;
+          }).join('');
+          return `<div class="dp-tool">
+            <div class="dp-tool-name">${esc(t.name)}</div>
+            <div class="dp-tool-desc">${esc(t.description || '')}</div>
+            ${params ? `<div class="dp-params">${params}</div>` : ''}
+          </div>`;
+        }).join('') + (n.endpoint ? `<div class="dp-endpoint">${esc(n.endpoint)}</div>` : '');
+      } else {
+        infoEl.textContent = n.info || '';
+      }
+
       dp.classList.add('open');
     }
 
@@ -1030,6 +1158,16 @@
         if (!n) return;
         const c = _statusColors[d.status];
         if (c) n.color = c;
+      });
+
+      _evtSource.addEventListener('node_detail', e => {
+        const d = JSON.parse(e.data);
+        const n = nodeMap[d.id];
+        if (!n) return;
+        n.tools_detail = d.tools;
+        n.endpoint = d.endpoint;
+        // Refresh panel if this node is already open
+        if (selectedNode === n) showDetailPanel(n);
       });
 
       _evtSource.addEventListener('done', () => {
